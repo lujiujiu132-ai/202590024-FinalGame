@@ -1,0 +1,65 @@
+[
+  {
+    "state": "0",
+    "link": "https://drive.google.com/file/d/1qiDZFHIwTKgobCOd9UifRwLR4qdOXgE2/view?usp=drive_link",
+    "minimum_value": "None",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "1",
+    "link": "https://drive.google.com/file/d/1Ik0pxxNdL1zx1o9csD6QDGQHbN3J84Bt/view?usp=drive_link",
+    "minimum_value": "75",
+    "maximum_value": "100",
+    "": ""
+  },
+  {
+    "state": "2",
+    "link": "",
+    "minimum_value": "",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "3",
+    "link": "",
+    "minimum_value": "",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "4",
+    "link": "",
+    "minimum_value": "",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "5",
+    "link": "",
+    "minimum_value": "",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "",
+    "link": "https://drive.google.com/file/d/1_oXu4Wz__IUkW6HK-UovTZJ7HrtLVDUR/view?usp=drive_link",
+    "minimum_value": "https://drive.google.com/file/d/1tRKwagKVAyG3tT34xHyWBpZp4yB2orN-/view?usp=drive_link",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "",
+    "link": "https://drive.google.com/file/d/1Y6jKwuZJ-aQkzBxI71e1_7uClOYFDgKH/view?usp=drive_link",
+    "minimum_value": "https://drive.google.com/file/d/1Exl6czLlhqC0-b7B5Ux-qwKVFC-r0cax/view?usp=drive_link",
+    "maximum_value": "",
+    "": ""
+  },
+  {
+    "state": "",
+    "link": "https://drive.google.com/file/d/112gM_e7Ts4Z6PX2tITHF4_9tlWRvu7j6/view?usp=drive_link",
+    "minimum_value": "https://drive.google.com/file/d/1JurqzEzk_wxwHDwIa7r2_GlNy6e8jbtK/view?usp=drive_link",
+    "maximum_value": "",
+    "": ""
+  }
+]

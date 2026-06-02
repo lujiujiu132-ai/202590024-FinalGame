@@ -1,0 +1,6 @@
+{
+  "name": "午夜疑云·AI探案",
+  "description": "一款基于Google Sheets数据驱动且搭载Gemini AI的多语言全栈暗黑悬疑侦探推理互动游戏。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
