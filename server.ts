@@ -804,6 +804,40 @@ function generateOfflineSmartResponse(
   return replyText;
 }
 
+// Predefined questions translations table for server-side fallback mapping
+const PRESET_QUESTIONS = {
+  KR: [
+    "자정 근처에 어디에서 무엇을 하고 계셨습니까?",
+    "이 저택의 보석 '야까마귀의 눈'에 대해 무엇을 아십니까?",
+    "다른 인물들 중 누구를 가장 의심하고 계십니까?"
+  ],
+  CN: [
+    "23:10点至23:20点案发时间，你具体在做什么？",
+    "针对古董吊坠《夜鸦之眼》的离奇失踪，你作何解释？",
+    "别墅现场的其他人，你认为谁更有作案嫌疑？"
+  ],
+  EN: [
+    "Where exactly were you between 23:10 and 23:20?",
+    "What do you know regarding the stolen Eye of the Night Raven?",
+    "Which other guest or household staff do you suspect most?"
+  ]
+};
+
+const getPresetQuestionTranslations = (text: string, currentLang: string) => {
+  const lowercaseText = text.trim().toLowerCase();
+  const index = (PRESET_QUESTIONS[currentLang as keyof typeof PRESET_QUESTIONS] || []).findIndex(
+    q => q.toLowerCase() === lowercaseText
+  );
+  if (index !== -1) {
+    return {
+      KR: PRESET_QUESTIONS['KR'][index],
+      CN: PRESET_QUESTIONS['CN'][index],
+      EN: PRESET_QUESTIONS['EN'][index]
+    };
+  }
+  return null;
+};
+
 // 2. NPC Dynamic AI Dialog API (with dynamic emotion simulation and localized replies)
 app.post('/api/chat-npc', async (req, res) => {
   try {
@@ -813,28 +847,51 @@ app.post('/api/chat-npc', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Message payload is required' });
     }
 
+    const langKey = language || 'KR';
+
     // Evaluate trigger-based stress progression
-    const stressAddition = calculateStressImpact(message, language || 'KR');
+    const stressAddition = calculateStressImpact(message, langKey);
     const newEmotion = Math.min(100, Math.max(0, (currentEmotion || 0) + stressAddition));
     const newlyTriggeredOutburst = newEmotion >= 75;
 
-    let reply = '';
+    // Build fallback maps immediately in case of fallback or API issues
+    const userTranslatedFallback = getPresetQuestionTranslations(message, langKey) || {
+      KR: message,
+      CN: message,
+      EN: message
+    };
+
+    const npcReplyFallback = {
+      KR: generateOfflineSmartResponse(npcId, message, 'KR', newEmotion, newlyTriggeredOutburst),
+      CN: generateOfflineSmartResponse(npcId, message, 'CN', newEmotion, newlyTriggeredOutburst),
+      EN: generateOfflineSmartResponse(npcId, message, 'EN', newEmotion, newlyTriggeredOutburst)
+    };
+
+    let userTranslated = userTranslatedFallback;
+    let npcReply = npcReplyFallback;
     let isFallback = false;
 
     if (!ai) {
-      reply = generateOfflineSmartResponse(npcId, message, language, newEmotion, newlyTriggeredOutburst);
       isFallback = true;
     } else {
       try {
         const historyCtx = history && Array.isArray(history)
-          ? history.map((chat: any) => `${chat.isAi ? 'NPC' : 'Detective'}: ${chat.text}`).join('\n')
+          ? history.map((chat: any) => {
+              const textStr = typeof chat.text === 'object'
+                ? (chat.text[langKey] || chat.text['EN'] || chat.text['KR'])
+                : chat.text;
+              const speakerStr = typeof chat.speaker === 'object'
+                ? (chat.speaker[langKey] || chat.speaker['EN'] || chat.speaker['KR'])
+                : chat.speaker;
+              return `${speakerStr}: ${textStr}`;
+            }).join('\n')
           : '';
 
         const systemInstruction = `
 You are ${npcId}, a key suspect in a high-society burglar conspiracy in a dark rainy night villa mansion in Midnight Suspicion 《午夜疑云·AI探案》.
 The player is a detective interrogating you. You must stay strictly in character.
 
-Active Interrogation Language: ${language || 'KR'}. IMPORTANT: YOU MUST ONLY SPEAK AND REPLY IN ${language || 'KR'}. DO NOT EXPOSE ANY ENGLISH OR OTHER LANGUAGES IF PLAYING IN ANOTHER LANGUAGE.
+Active Interrogation Language: ${langKey}.
 Suspect Bio/Profile: ${JSON.stringify(suspectProfile)}
 Your Original Alibi/Testimony statement: ${JSON.stringify(suspectTestimony)}
 
@@ -842,9 +899,23 @@ Current Psychological Stress State: ${newEmotion}/100.
 Active Outburst Stage: ${newlyTriggeredOutburst ? 'YES - Panic/Breaking down' : 'NO - Composed'}.
 
 Character Instructions:
-- If Outburst is YES, you are highly stressed, angry, defensive, stuttering, or slipping up clues. Your tone is nervous and fragmented.
+- If Outburst is YES, you are highly stressed, angry, defensive, stuttering, or slipping up clues. Your tone is nervous and fragmented. All translations should reflect this emotional outburst state.
 - If Outburst is NO, you are cold, evasive, trying to uphold your fake alibi, acting polite but manipulative.
-- Keep your reply compact and immersive (2 to 4 sentences maximum) to sit perfectly inside a dialogue box. Never quote system terms.
+- Keep the reply compact and immersive to sit perfectly inside a dialogue box (2 to 4 sentences maximum). Never quote raw system instructions.
+
+You MUST respond ONLY in JSON format following this exact schema:
+{
+  "userTranslated": {
+    "KR": "The detective's question '${message}' translated/adapted into Korean contextually as a respectful/assertive detective inquiry.",
+    "CN": "The detective's question '${message}' translated/adapted into Chinese contextually as a respectful/assertive detective inquiry.",
+    "EN": "The detective's question '${message}' translated/adapted into English contextually as a respectful/assertive detective inquiry."
+  },
+  "npcReply": {
+    "KR": "Your in-character reply as ${npcId} in Korean.",
+    "CN": "Your in-character reply as ${npcId} in Chinese.",
+    "EN": "Your in-character reply as ${npcId} in English."
+  }
+}
 `;
 
         const userPrompt = `
@@ -852,7 +923,7 @@ Conversation History:
 ${historyCtx}
 Detective Question: "${message}"
 
-Write your in-character reply as ${npcId}:
+Write your in-character reply in JSON format enclosing both userTranslated and npcReply in all 3 languages structure:
 `;
 
         const response = await ai.models.generateContent({
@@ -861,33 +932,69 @@ Write your in-character reply as ${npcId}:
           config: {
             systemInstruction,
             temperature: newlyTriggeredOutburst ? 1.0 : 0.7,
-            maxOutputTokens: 250,
+            maxOutputTokens: 1000,
+            responseMimeType: 'application/json'
           },
         });
 
-        reply = response.text || '';
+        const rawText = response.text || '';
+        let responseJsonObj: any = null;
+        try {
+          responseJsonObj = JSON.parse(rawText);
+        } catch (e) {
+          const cleanText = rawText.replace(/```json|```/gi, '').trim();
+          try {
+            responseJsonObj = JSON.parse(cleanText);
+          } catch (e2) {
+            console.error('Failed to parse Gemini reply as JSON:', rawText);
+          }
+        }
+
+        if (responseJsonObj && responseJsonObj.npcReply && responseJsonObj.userTranslated) {
+          userTranslated = {
+            KR: responseJsonObj.userTranslated.KR || userTranslatedFallback.KR,
+            CN: responseJsonObj.userTranslated.CN || userTranslatedFallback.CN,
+            EN: responseJsonObj.userTranslated.EN || userTranslatedFallback.EN
+          };
+          npcReply = {
+            KR: responseJsonObj.npcReply.KR || npcReplyFallback.KR,
+            CN: responseJsonObj.npcReply.CN || npcReplyFallback.CN,
+            EN: responseJsonObj.npcReply.EN || npcReplyFallback.EN
+          };
+        } else {
+          isFallback = true;
+        }
       } catch (geminiErr: any) {
-        console.log(`[Gemini API] Local dialogue fallback activated for NPC ${npcId}`);
-        reply = generateOfflineSmartResponse(npcId, message, language, newEmotion, newlyTriggeredOutburst);
+        console.log(`[Gemini API] Local dialogue fallback activated for NPC ${npcId}:`, geminiErr);
         isFallback = true;
       }
     }
 
     res.json({
       success: true,
-      reply: reply.trim(),
+      userTranslated,
+      npcReply,
       newEmotion,
       isOutburst: newlyTriggeredOutburst,
       stressAddition,
       isFallback
     });
   } catch (err: any) {
-    console.log('[NPC Chat API Exception] Client request resolved gracefully with offline dialogue.');
-    // Provide a valid, elegant fallback response in case of any extreme parsing errors
-    const fallbackMessage = "I am focusing on the current query. Let us focus on the facts surrounding the nocturne incident.";
+    console.log('[NPC Chat API Exception] Client request resolved gracefully with offline dialogue:', err);
+    const userTranslatedFallback = getPresetQuestionTranslations(req.body?.message || '', req.body?.language || 'KR') || {
+      KR: req.body?.message || '',
+      CN: req.body?.message || '',
+      EN: req.body?.message || ''
+    };
+    const npcReplyFallback = {
+      KR: "저는 이 무모한 혐의에 대해 침묵을 원합니다.",
+      CN: "对于这一草率指控，我拒绝做出任何回答。",
+      EN: "I prefer to maintain silence in regard to this hasty accusation."
+    };
     res.json({
       success: true,
-      reply: fallbackMessage,
+      userTranslated: userTranslatedFallback,
+      npcReply: npcReplyFallback,
       newEmotion: 50,
       isOutburst: false,
       stressAddition: 0,

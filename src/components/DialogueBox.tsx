@@ -12,7 +12,7 @@ interface DialogueBoxProps {
   npc: NPC;
   language: Language;
   t: TranslationSet;
-  dialogueHistory: { speaker: string; text: string; isAi: boolean }[];
+  dialogueHistory: { speaker: Record<Language, string> | string; text: Record<Language, string> | string; isAi: boolean }[];
   isChatLoading: boolean;
   onSendCustomAsk: (message: string) => void;
   onPresentEvidenceSelection: () => void;
@@ -156,25 +156,34 @@ export default function DialogueBox({
           </div>
 
           <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto mt-1 pr-1">
-            {dialogueHistory.map((line, idx) => (
-              <div
-                key={idx}
-                className={`flex flex-col text-left ${line.isAi ? 'items-start' : 'items-end'}`}
-              >
-                <div className="text-[9px] font-mono text-zinc-500 mb-0.5 tracking-wider uppercase">
-                  {line.speaker}
-                </div>
+            {dialogueHistory.map((line, idx) => {
+              const speakerText = typeof line.speaker === 'object' 
+                ? (line.speaker[language] || line.speaker['EN'] || line.speaker['KR']) 
+                : line.speaker;
+              const bodyText = typeof line.text === 'object' 
+                ? (line.text[language] || line.text['EN'] || line.text['KR']) 
+                : line.text;
+
+              return (
                 <div
-                  className={`text-xs p-2.5 rounded-lg leading-relaxed max-w-[90%] font-sans ${
-                    line.isAi
-                      ? 'bg-zinc-900/90 text-zinc-200 border border-zinc-800'
-                      : 'bg-[#fb7185]/10 text-[#fda4af] border border-[#fb7185]/35'
-                  }`}
+                  key={idx}
+                  className={`flex flex-col text-left ${line.isAi ? 'items-start' : 'items-end'}`}
                 >
-                  {line.text}
+                  <div className="text-[9px] font-mono text-zinc-500 mb-0.5 tracking-wider uppercase">
+                    {speakerText}
+                  </div>
+                  <div
+                    className={`text-xs p-2.5 rounded-lg leading-relaxed max-w-[90%] font-sans ${
+                      line.isAi
+                        ? 'bg-zinc-900/90 text-zinc-200 border border-zinc-800'
+                        : 'bg-[#fb7185]/10 text-[#fda4af] border border-[#fb7185]/35'
+                    }`}
+                  >
+                    {bodyText}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {dialogueHistory.length === 0 && (
               <div className="text-zinc-650 text-xs italic py-8 text-center font-mono">

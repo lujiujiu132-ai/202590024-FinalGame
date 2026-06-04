@@ -45,11 +45,45 @@ import {
   Sliders
 } from 'lucide-react';
 
+const PRESET_QUESTIONS = {
+  KR: [
+    "자정 근처에 어디에서 무엇을 하고 계셨습니까?",
+    "이 저택의 보석 '야까마귀의 눈'에 대해 무엇을 아십니까?",
+    "다른 인물들 중 누구를 가장 의심하고 계십니까?"
+  ],
+  CN: [
+    "23:10点至23:20点案发时间，你具体在做什么？",
+    "针对古董吊坠《夜鸦之眼》的离奇失踪，你作何解释？",
+    "别墅现场的其他人，你认为谁更有作案嫌疑？"
+  ],
+  EN: [
+    "Where exactly were you between 23:10 and 23:20?",
+    "What do you know regarding the stolen Eye of the Night Raven?",
+    "Which other guest or household staff do you suspect most?"
+  ]
+};
+
+const getPresetQuestionTranslations = (text: string, currentLang: Language) => {
+  const lowercaseText = text.trim().toLowerCase();
+  const index = PRESET_QUESTIONS[currentLang].findIndex(
+    q => q.toLowerCase() === lowercaseText
+  );
+  if (index !== -1) {
+    return {
+      KR: PRESET_QUESTIONS['KR'][index],
+      CN: PRESET_QUESTIONS['CN'][index],
+      EN: PRESET_QUESTIONS['EN'][index]
+    };
+  }
+  return null;
+};
+
 export default function App() {
   // Global Game Configuration
   const [language, setLanguage] = useState<Language>('KR'); // Default is KR
   const [playerLocation, setPlayerLocation] = useState<LocationKey>('LivingRoom');
   const [playerAvatar, setPlayerAvatar] = useState<PlayerAvatarState>('StandAvatar');
+  const [isFading, setIsFading] = useState(false);
   const [discoveredClues, setDiscoveredClues] = useState<string[]>([]);
   const [investigatedHotspots, setInvestigatedHotspots] = useState<string[]>([]);
   const [evidenceInventory, setEvidenceInventory] = useState<EvidenceItem[]>([]);
@@ -172,19 +206,63 @@ export default function App() {
     };
   }, [isMuted, gameStarted, playerLocation]);
 
-  // Handle auto footstep toggle and animation on location transition
+  // Synchronized Audio Sfx Triggers
+  // 1. Clue update feedback (Pencil scribble sound when new clue is added)
+  useEffect(() => {
+    if (gameStarted && discoveredClues.length > 0) {
+      gameAudio.playPencilWrite();
+    }
+  }, [discoveredClues.length]);
+
+  // 2. Interrogation trigger feedback (Fast tension heartbeat sound when opening dialog modal)
+  useEffect(() => {
+    if (gameStarted && activeDialogueNpcId) {
+      gameAudio.playHeartbeat();
+    }
+  }, [activeDialogueNpcId, gameStarted]);
+
+  // 3. Suspect emotional collapse feedback (Glass shattering sound when stress breaks to outburst)
+  const prevOutburstsRef = React.useRef<Record<string, boolean>>({
+    Butler: false,
+    Maid: false,
+    Visitor: false,
+    Niece: false,
+    Doctor: false
+  });
+
+  useEffect(() => {
+    if (!gameStarted) return;
+    let newlyTriggered = false;
+    Object.keys(rawNPCStates).forEach(npcId => {
+      const isCurrentlyOutburst = rawNPCStates[npcId]?.isOutburst;
+      const wasOutburst = prevOutburstsRef.current[npcId];
+      if (isCurrentlyOutburst && !wasOutburst) {
+        newlyTriggered = true;
+      }
+      prevOutburstsRef.current[npcId] = !!isCurrentlyOutburst;
+    });
+
+    if (newlyTriggered) {
+      gameAudio.playGlassShatter();
+    }
+  }, [rawNPCStates, gameStarted]);
+
+  // Handle auto footstep toggle and animation on location transition with smooth fade-to-black cinematic animation
   const handleMoveLocation = (target: LocationKey) => {
-    if (target === playerLocation) return;
+    if (target === playerLocation || isFading) return;
+    setIsFading(true);
     gameAudio.playFootstep();
-    setPlayerAvatar('WalkAvatar');
     
-    // Smooth walking delay transition
+    // Smooth fade-to-black and back-in transition
     setTimeout(() => {
       setPlayerLocation(target);
       // Let dialogue modal be closed initially on transition to prevent sudden interruptions
       setActiveDialogueNpcId(null);
-      setPlayerAvatar(necklaceFound ? 'ConfidentAvatar' : 'StandAvatar');
-    }, 600);
+      
+      setTimeout(() => {
+        setIsFading(false);
+      }, 150);
+    }, 450);
   };
 
   // Helper resolving Drive / Spreadsheet background assets
@@ -258,10 +336,12 @@ export default function App() {
   // Helper resolving Player Detective Character assets
   const getPlayerAvatarUrl = (): string => {
     if (sheetData && sheetData.player) {
-      let code = '0'; // Stand
-      if (playerAvatar === 'WalkAvatar') code = '1';
-      else if (playerAvatar === 'ThinkAvatar') code = '0';
-      else if (playerAvatar === 'ConfidentAvatar') code = '1';
+      let code = '0'; // Stand by default
+      if (necklaceFound) {
+        code = '1'; // Show confident avatar only when necklace is found!
+      } else {
+        code = '0'; // Strict stand avatar otherwise
+      }
 
       const match = sheetData.player.find((row: any) => row.state === code);
       if (match) {
@@ -357,6 +437,93 @@ export default function App() {
       { id: 'winerack', name: { KR: '철제 고유 와인랙', CN: '陈年白兰地酒架', EN: 'Ancient Mahogany Wine Rack' }, x: '72%', y: '42%', clueId: 'winerack_clue' },
       { id: 'groundgrate', name: { KR: '지하 철제 석탄고 격쇠', CN: '지하 냉고 철격자', EN: 'Rust Iron Sub-floor Grate' }, x: '51%', y: '51%', clueId: 'groundgrate_clue' }
     ]
+  };
+
+  // Dynamic list of connected corridors and rooms for quick in-scene doors with directional positioning
+  const getConnectedLocations = (currentLoc: LocationKey) => {
+    const list: { target: LocationKey; position: 'top' | 'bottom' | 'left' | 'right'; label: Record<Language, string> }[] = [];
+    
+    if (currentLoc === 'LivingRoom') {
+      list.push({
+        target: 'Hallway',
+        position: 'right',
+        label: {
+          KR: '복도 (Hallway) ➔',
+          CN: '前往走廊 (Hallway) ➔',
+          EN: 'To Hallway ➔'
+        }
+      });
+    } else if (currentLoc === 'Hallway') {
+      list.push(
+        {
+          target: 'LivingRoom',
+          position: 'left',
+          label: {
+            KR: '◀ 거실 (Living Room)',
+            CN: '◀ 返回客厅 (Living Room)',
+            EN: '◀ Living Room'
+          }
+        },
+        {
+          target: 'Bedroom',
+          position: 'top',
+          label: {
+            KR: '▲ 2층 침실 (Bedroom)',
+            CN: '▲ 前往二楼卧室 (Bedroom)',
+            EN: '▲ To Bedroom'
+          }
+        },
+        {
+          target: 'Kitchen',
+          position: 'right',
+          label: {
+            KR: '오른쪽 주방 (Kitchen) ➔',
+            CN: '前往右侧厨房 (Kitchen) ➔',
+            EN: 'To Kitchen ➔'
+          }
+        },
+        {
+          target: 'WineCellar',
+          position: 'bottom',
+          label: {
+            KR: '▼ 지하 술 창고 (Wine Cellar)',
+            CN: '▼ 前往楼下酒窖 (Wine Cellar)',
+            EN: '▼ To Wine Cellar'
+          }
+        }
+      );
+    } else if (currentLoc === 'Kitchen') {
+      list.push({
+        target: 'Hallway',
+        position: 'left',
+        label: {
+          KR: '◀ 복도 (Hallway)',
+          CN: '◀ 返回走廊 (Hallway)',
+          EN: '◀ Back to Hallway'
+        }
+      });
+    } else if (currentLoc === 'Bedroom') {
+      list.push({
+        target: 'Hallway',
+        position: 'bottom',
+        label: {
+          KR: '▼ 복도 (Hallway)',
+          CN: '▼ 返回走廊 (Hallway)',
+          EN: '▼ Back to Hallway'
+        }
+      });
+    } else if (currentLoc === 'WineCellar') {
+      list.push({
+        target: 'Hallway',
+        position: 'top',
+        label: {
+          KR: '▲ 복도 (Hallway)',
+          CN: '▲ 返回走廊 (Hallway)',
+          EN: '▲ Back to Hallway'
+        }
+      });
+    }
+    return list;
   };
 
   // Clicking an active hotspot triggers investigation
@@ -504,10 +671,27 @@ export default function App() {
 
     const activeNpc = compileSuspectInfo(activeDialogueNpcId);
     
+    // Check if user's question maps to a quick preset, for perfect translation
+    const userQuestionMap = getPresetQuestionTranslations(text, language) || {
+      KR: text,
+      CN: text,
+      EN: text
+    };
+
+    const nextItem = {
+      speaker: {
+        KR: '탐정',
+        CN: '侦探',
+        EN: 'Detective'
+      },
+      text: userQuestionMap,
+      isAi: false
+    };
+
     // Optimistic fast-record player statement
     const updatedHistory = [
       ...(dialogueHistory[activeDialogueNpcId] || []),
-      { speaker: 'Detective', text, isAi: false }
+      nextItem
     ];
     setDialogueHistory(prev => ({
       ...prev,
@@ -545,7 +729,15 @@ export default function App() {
           ...prev,
           [activeDialogueNpcId]: [
             ...(prev[activeDialogueNpcId] || []),
-            { speaker: activeNpc.name[language], text: json.reply, isAi: true }
+            {
+              speaker: {
+                KR: activeNpc.name.KR,
+                CN: activeNpc.name.CN,
+                EN: activeNpc.name.EN
+              },
+              text: json.npcReply,
+              isAi: true
+            }
           ]
         }));
 
@@ -561,7 +753,10 @@ export default function App() {
       const stressAddition = calculateStressImpact(text, language || 'KR');
       const newEmotion = Math.min(100, Math.max(0, (activeNpc.emotion || 0) + stressAddition));
       const newlyTriggeredOutburst = newEmotion >= 75;
-      const replyText = generateOfflineSmartResponse(activeDialogueNpcId, text, language, newEmotion, newlyTriggeredOutburst);
+
+      const replyKR = generateOfflineSmartResponse(activeDialogueNpcId, text, 'KR', newEmotion, newlyTriggeredOutburst);
+      const replyCN = generateOfflineSmartResponse(activeDialogueNpcId, text, 'CN', newEmotion, newlyTriggeredOutburst);
+      const replyEN = generateOfflineSmartResponse(activeDialogueNpcId, text, 'EN', newEmotion, newlyTriggeredOutburst);
 
       // Apply local client state updates
       setRawNPCStates(prev => ({
@@ -576,7 +771,19 @@ export default function App() {
         ...prev,
         [activeDialogueNpcId]: [
           ...(prev[activeDialogueNpcId] || []),
-          { speaker: activeNpc.name[language], text: replyText, isAi: true }
+          {
+            speaker: {
+              KR: activeNpc.name.KR,
+              CN: activeNpc.name.CN,
+              EN: activeNpc.name.EN
+            },
+            text: {
+              KR: replyKR,
+              CN: replyCN,
+              EN: replyEN
+            },
+            isAi: true
+          }
         ]
       }));
 
@@ -608,14 +815,36 @@ export default function App() {
         }
       }));
 
-      // Add high-impact breakthrough transcript to logs
-      const successText = activeNpc.gavelSuccessText[language] || activeNpc.gavelSuccessText['KR'];
+      const tKR = LOCALIZED_STRINGS['KR'];
+      const tCN = LOCALIZED_STRINGS['CN'];
+      const tEN = LOCALIZED_STRINGS['EN'];
+
       setDialogueHistory(prev => ({
         ...prev,
         [activeDialogueNpcId]: [
           ...(prev[activeDialogueNpcId] || []),
-          { speaker: 'SYSTEM', text: `[ ${t.gavelObjection} ]`, isAi: true },
-          { speaker: activeNpc.name[language], text: successText, isAi: true }
+          {
+            speaker: { KR: '시스템', CN: '系统', EN: 'SYSTEM' },
+            text: {
+              KR: `[ ${tKR.gavelObjection} ]`,
+              CN: `[ ${tCN.gavelObjection} ]`,
+              EN: `[ ${tEN.gavelObjection} ]`
+            },
+            isAi: true
+          },
+          {
+            speaker: {
+              KR: activeNpc.name.KR,
+              CN: activeNpc.name.CN,
+              EN: activeNpc.name.EN
+            },
+            text: {
+              KR: activeNpc.gavelSuccessText.KR || activeNpc.gavelSuccessText['KR'],
+              CN: activeNpc.gavelSuccessText.CN || activeNpc.gavelSuccessText['KR'],
+              EN: activeNpc.gavelSuccessText.EN || activeNpc.gavelSuccessText['KR']
+            },
+            isAi: true
+          }
         ]
       }));
 
@@ -631,9 +860,9 @@ export default function App() {
         type: 'success',
         title: successTitle,
         message: {
-          KR: successText,
-          CN: successText,
-          EN: successText
+          KR: activeNpc.gavelSuccessText.KR || activeNpc.gavelSuccessText['KR'],
+          CN: activeNpc.gavelSuccessText.CN || activeNpc.gavelSuccessText['KR'],
+          EN: activeNpc.gavelSuccessText.EN || activeNpc.gavelSuccessText['KR']
         },
         isPinboard: false
       });
@@ -661,7 +890,19 @@ export default function App() {
         ...prev,
         [activeDialogueNpcId]: [
           ...(prev[activeDialogueNpcId] || []),
-          { speaker: activeNpc.name[language], text: mismatchResponses[language], isAi: true }
+          {
+            speaker: {
+              KR: activeNpc.name.KR,
+              CN: activeNpc.name.CN,
+              EN: activeNpc.name.EN
+            },
+            text: {
+              KR: mismatchResponses.KR,
+              CN: mismatchResponses.CN,
+              EN: mismatchResponses.EN
+            },
+            isAi: true
+          }
         ]
       }));
 
@@ -1092,19 +1333,26 @@ export default function App() {
         <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* Main Visual Novel Presentation Frame */}
-          <section className="lg:col-span-8 space-y-6">
+          <section className="lg:col-span-9 space-y-6">
             
             {/* Background Container Frame */}
             <div
               id="scene-visual-novel"
               style={{ backgroundImage: `url('${getActiveBackground()}')` }}
-              className="w-full h-96 md:h-[500px] lg:h-[580px] xl:h-[640px] rounded-2xl bg-cover bg-center border border-zinc-805 shadow-2xl relative overflow-hidden flex items-end justify-between p-4 bg-[#0a0a0d]"
+              className="w-full h-[450px] md:h-[620px] lg:h-[720px] xl:h-[800px] rounded-3xl bg-cover bg-center border border-zinc-805 shadow-2xl relative overflow-hidden flex items-end justify-between p-4 bg-[#0a0a0d]"
             >
               {/* Cinematic vignetting shadow mask */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/35 pointer-events-none z-0" />
 
               {/* Rain noise sizzle details overlay */}
               <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.015)_1px,transparent_1px)] [background-size:8px_8px] opacity-60 pointer-events-none" />
+
+              {/* Smooth cinematic room transition fade-to-black cover overlay */}
+              <div 
+                className={`absolute inset-0 bg-black transition-opacity duration-500 ease-in-out z-45 pointer-events-none ${
+                  isFading ? 'opacity-100' : 'opacity-0'
+                }`} 
+              />
 
               {/* Header metadata label badge */}
               <div className="absolute top-4 left-4 z-10 bg-black/75 backdrop-blur-sm border border-zinc-800/80 px-3.5 py-1.5 rounded-lg flex items-center gap-2">
@@ -1113,6 +1361,33 @@ export default function App() {
                   {t[playerLocation]}
                 </span>
               </div>
+
+              {/* Dynamic In-scene Location Shortcuts */}
+              {getConnectedLocations(playerLocation).map(route => {
+                let positionClasses = '';
+                if (route.position === 'left') {
+                  positionClasses = 'absolute left-4 top-[22%] -translate-y-1/2';
+                } else if (route.position === 'right') {
+                  positionClasses = 'absolute right-4 top-[22%] -translate-y-1/2';
+                } else if (route.position === 'top') {
+                  positionClasses = 'absolute top-4 left-1/2 -translate-x-1/2';
+                } else {
+                  positionClasses = 'absolute bottom-6 left-1/2 -translate-x-1/2';
+                }
+
+                return (
+                  <button
+                    key={route.target}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleMoveLocation(route.target);
+                    }}
+                    className={`${positionClasses} z-30 px-3 py-1.5 bg-black/75 hover:bg-zinc-950 border border-zinc-850 hover:border-red-900/60 text-zinc-300 hover:text-red-400 rounded-md text-[10px] md:text-xs font-mono font-bold tracking-wider transition-all duration-300 shadow-[0_4px_12px_rgba(0,0,0,0.6)] backdrop-blur-sm flex items-center gap-1 cursor-pointer active:scale-95`}
+                  >
+                    <span>{route.label[language]}</span>
+                  </button>
+                );
+              })}
 
               {/* Clickable Interactive Hotspots */}
               {roomHotspots[playerLocation]?.map(spot => {
@@ -1154,12 +1429,12 @@ export default function App() {
               {/* 2. Visual Novel Detective and Suspect models (Integrated and interactive click triggers) */}
               <div className="absolute inset-x-0 bottom-0 top-0 pointer-events-none z-10">
                 
-                {/* Detective avatar standing on left */}
+                {/* Detective avatar standing on left - Scaled up for immersive visual novel experience */}
                 <div 
                   className="absolute bottom-0 select-none flex flex-col items-center pb-2 pointer-events-auto"
                   style={{ left: '16%', transform: 'translateX(-50%)' }}
                 >
-                  <div className="w-28 h-48 md:w-36 md:h-[320px] lg:w-44 lg:h-[400px] xl:w-52 xl:h-[460px] overflow-hidden relative">
+                  <div className="w-36 h-56 md:w-52 md:h-[480px] lg:w-64 lg:h-[580px] xl:w-76 xl:h-[680px] overflow-hidden relative">
                     <img
                       src={getPlayerAvatarUrl()}
                       alt="Detective Investigator"
@@ -1172,7 +1447,7 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Suspects inside current location (placed directly inside the landscape background scene) */}
+                {/* Suspects inside current location (placed directly inside the landscape background scene, scaled up in size) */}
                 {Object.values(SUSPECTS_DATA)
                   .filter(spouse => spouse.location === playerLocation)
                   .map((sus_raw, idx, arr) => {
@@ -1204,7 +1479,7 @@ export default function App() {
                           </div>
                         )}
 
-                        <div className="w-28 h-48 md:w-36 md:h-[320px] lg:w-44 lg:h-[400px] xl:w-52 xl:h-[460px] overflow-hidden relative">
+                        <div className="w-36 h-56 md:w-52 md:h-[480px] lg:w-64 lg:h-[580px] xl:w-76 xl:h-[680px] overflow-hidden relative">
                           <img
                             src={npc.isOutburst ? npc.outburstAvatar : npc.avatar}
                             alt={npc.name[language]}
@@ -1233,82 +1508,18 @@ export default function App() {
               </div>
             </div>
 
-            {/* Live Case Briefing / Progress status panel */}
-            <div className="bg-[#0b0c10] border border-zinc-900 rounded-2xl p-5 md:p-6 shadow-xl text-left relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-3 opacity-10 font-black text-6xl select-none font-mono tracking-tighter">
-                STATUS
-              </div>
-              
-              <h3 className="text-xs font-mono tracking-wider font-extrabold text-zinc-400 uppercase border-b border-zinc-900 pb-2 mb-4 flex items-center justify-between">
-                <span>⚡ {language === 'KR' ? '수사 실시간 브리핑' : language === 'CN' ? '案件实地勘查进度' : 'FIELD DETECTIVE STATUS LOG'}</span>
-                <span className="text-[10px] text-zinc-500 font-mono">23:45 UTC</span>
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Stats block */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-500">{language === 'KR' ? '지목 가능 용의자' : language === 'CN' ? '嫌疑嫌犯人数' : 'TOTAL SUSPECTS'}:</span>
-                    <span className="font-bold text-gray-200">5 Persons</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-500">{language === 'KR' ? '발견된 단서' : language === 'CN' ? '已搜集线索' : 'DISCOVERED CLUES'}:</span>
-                    <span className="font-bold text-red-400">{discoveredClues.length} / {INITIAL_CLUES.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-500">{language === 'KR' ? '수조 조사 여부' : language === 'CN' ? '厨房异常放水' : 'FAUCET INSPECTED'}:</span>
-                    <span className={`font-bold ${faucetInvestigated ? 'text-cyan-400' : 'text-zinc-650'}`}>
-                      {faucetInvestigated 
-                        ? (language === 'KR' ? '조완 💧' : language === 'CN' ? '已完成调查 💧' : 'YES 💧') 
-                        : (language === 'KR' ? '미조사' : language === 'CN' ? '未搜查' : 'NOT YET')}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-500">{language === 'KR' ? '목걸이 회수 여부' : language === 'CN' ? '夜鸦之眼锁定' : 'NECKLACE SECURED'}:</span>
-                    <span className={`font-bold ${necklaceFound ? 'text-amber-500' : 'text-zinc-650'}`}>
-                      {necklaceFound ? 'SECURED 💎' : 'LOST'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Discovered quick deck block */}
-                <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-900 flex flex-col justify-between">
-                  <span className="text-[9px] font-mono text-zinc-500 tracking-wider block uppercase mb-1.5">
-                    {language === 'KR' ? '최신 발견된 단서 목록' : language === 'CN' ? '最新收集的关键勘验' : 'LATEST HOTSPOT CLUES'}
-                  </span>
-                  <div className="flex-1 overflow-y-auto max-h-[85px] space-y-1 pr-0.5">
-                    {discoveredClues.slice(-3).map(id => {
-                      const clue = INITIAL_CLUES.find(c => c.id === id);
-                      if (!clue) return null;
-                      return (
-                        <div key={id} className="text-[10px] text-zinc-400 flex items-center gap-1">
-                          <span className="text-red-500 shrink-0">▪</span>
-                          <span className="truncate">{clue.title[language]}</span>
-                        </div>
-                      );
-                    })}
-                    {discoveredClues.length === 0 && (
-                      <span className="text-[10px] text-zinc-650 italic block pt-3 text-center">
-                        {language === 'KR' ? '[ 아직 발견된 단서가 없습니다 ]' : language === 'CN' ? '[ 暂无搜寻到的关键线索 ]' : '[ NO DISCOVERED CLUES ]'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
           </section>
 
           {/* Sidebar Area controls */}
-          <section className="lg:col-span-4 space-y-6">
+          <section className="lg:col-span-3 space-y-4">
             
             {/* Quick Action Buttons */}
-            <div className="bg-[#0b0c10] border border-zinc-875 p-5 rounded-2xl shadow-xl space-y-3.5 text-left">
-              <h3 className="text-xs font-mono tracking-wider font-extrabold text-zinc-400 uppercase border-b border-zinc-900 pb-2">
+            <div className="bg-[#0b0c10] border border-zinc-875 p-4 rounded-xl shadow-xl space-y-2.5 text-left">
+              <h3 className="text-[10px] font-mono tracking-wider font-extrabold text-zinc-400 uppercase border-b border-zinc-900 pb-1.5">
                 DETECTION EXPEDITION CONTROL
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-2">
                 {/* Visual Logic Pinboard access button */}
                 <button
                   id="btn-open-pinboard"
@@ -1316,9 +1527,9 @@ export default function App() {
                     gameAudio.playPencilWrite();
                     setShowLogicBoardModal(true);
                   }}
-                  className="px-4 py-3 bg-gradient-to-r from-red-950 to-red-900 hover:from-red-900 hover:to-red-800 text-red-400 hover:text-red-300 border-2 border-red-900/60 hover:border-red-600/50 text-xs rounded-xl font-black tracking-widest transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-lg animate-[pulse_3s_infinite]"
+                  className="px-3 py-2 bg-gradient-to-r from-red-950 to-red-900 hover:from-red-900 hover:to-red-800 text-red-400 hover:text-red-300 border border-red-900/40 hover:border-red-650/50 text-[11px] rounded-xl font-black tracking-widest transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-lg animate-[pulse_3s_infinite]"
                 >
-                  <Grid className="w-4 h-4 text-red-500" />
+                  <Grid className="w-3.5 h-3.5 text-red-500" />
                   {language === 'KR' ? '논리 연결 핀보드' : language === 'CN' ? '推理侦破逻辑白板' : 'LOGIC PIN-BOARD'}
                 </button>
 
@@ -1329,9 +1540,9 @@ export default function App() {
                     gameAudio.playPencilWrite();
                     setShowHandbook(true);
                   }}
-                  className="px-4 py-3 bg-[#11131a] hover:bg-[#1b1e2a] text-gray-200 border border-zinc-805 hover:border-zinc-700 text-xs rounded-xl font-bold transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-md"
+                  className="px-3 py-2 bg-[#11131a] hover:bg-[#1b1e2a] text-gray-200 border border-zinc-805 hover:border-zinc-700 text-[11px] rounded-xl font-bold transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-md"
                 >
-                  <Notebook className="w-4 h-4 text-red-500" />
+                  <Notebook className="w-3.5 h-3.5 text-red-500" />
                   {t.notebookTitle}
                 </button>
 
@@ -1342,75 +1553,100 @@ export default function App() {
                     gameAudio.playGavel();
                     setShowAccuseModal(true);
                   }}
-                  className="px-4 py-3 bg-gradient-to-r from-red-700 to-red-650 hover:from-red-650 hover:to-red-600 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-lg shadow-red-950/20 col-span-1 sm:col-span-2 lg:col-span-1"
+                  className="px-3 py-2 bg-gradient-to-r from-red-700 to-red-650 hover:from-red-650 hover:to-red-600 text-white font-bold text-[11px] rounded-xl transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-lg shadow-red-950/20"
                 >
-                  <AlertTriangle className="w-4 h-4" />
+                  <AlertTriangle className="w-3.5 h-3.5" />
                   {t.accuseBtn}
                 </button>
               </div>
             </div>
 
             {/* Live Evidence Showcase Panel */}
-            <div className="bg-[#0b0c10] border border-zinc-800 p-5 rounded-2xl shadow-xl text-left">
-              <h3 className="text-xs font-mono tracking-wider font-bold text-zinc-400 uppercase border-b border-zinc-900 pb-2 mb-4 flex items-center justify-between">
+            <div className="bg-[#0b0c10] border border-zinc-800 p-4 rounded-xl shadow-xl text-left">
+              <h3 className="text-[10px] font-mono tracking-wider font-bold text-zinc-400 uppercase border-b border-zinc-900 pb-1.5 mb-3 flex items-center justify-between">
                 <span>{t.notebookTabEvidence}</span>
-                <span className="text-[10px] text-zinc-500 font-mono bg-zinc-950 px-2 py-0.5 rounded-lg border border-zinc-900">COUNT: {evidenceInventory.length}</span>
+                <span className="text-[9px] text-zinc-500 font-mono bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-900">COUNT: {evidenceInventory.length}</span>
               </h3>
 
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 {evidenceInventory.map(item => (
-                  <div key={item.id} className="flex gap-2.5 p-2 bg-zinc-950/60 border border-zinc-900 rounded-xl transition-all hover:border-amber-600/30">
-                    <div className="w-10 h-10 bg-zinc-900 border border-zinc-850 rounded-lg shrink-0 overflow-hidden">
+                  <div key={item.id} className="flex gap-2 p-1.5 bg-zinc-950/60 border border-zinc-900 rounded-lg transition-all hover:border-amber-600/30">
+                    <div className="w-8 h-8 bg-zinc-900 border border-zinc-850 rounded shrink-0 overflow-hidden">
                       <img src={item.image} alt="Evidence item" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-[10px] font-bold text-amber-500 truncate">{item.name[language]}</h4>
-                      <p className="text-[9px] text-zinc-450 mt-0.5 line-clamp-2 leading-relaxed font-sans">{item.description[language]}</p>
+                      <h4 className="text-[9px] font-bold text-amber-500 truncate">{item.name[language]}</h4>
+                      <p className="text-[8px] text-zinc-450 mt-0.5 line-clamp-1 leading-normal font-sans">{item.description[language]}</p>
                     </div>
                   </div>
                 ))}
                 {evidenceInventory.length === 0 && (
-                  <p className="text-[10px] text-zinc-650 italic text-center py-4">{t.evidenceEmptyList}</p>
+                  <p className="text-[9px] text-zinc-650 italic text-center py-2">{t.evidenceEmptyList}</p>
                 )}
               </div>
             </div>
 
-            {/* Move Route navigator panel */}
-            <div className="bg-[#0b0c10] border border-zinc-875 p-5 rounded-2xl shadow-xl text-left">
-              <h3 className="text-xs font-mono tracking-wider font-bold text-zinc-400 uppercase border-b border-zinc-900 pb-2 mb-4">
-                {t.navTitle}
+            {/* Live Case Briefing / Progress status panel (Relocated inside Sidebar) */}
+            <div className="bg-[#0b0c10] border border-zinc-900 rounded-xl p-4 shadow-xl text-left relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-2 opacity-[0.03] font-black text-4xl select-none font-mono tracking-tighter/80">
+                STATUS
+              </div>
+              
+              <h3 className="text-[10px] font-mono tracking-wider font-extrabold text-zinc-400 uppercase border-b border-zinc-900 pb-1.5 mb-3 flex items-center justify-between">
+                <span>⚡ {language === 'KR' ? '수사 실시간 브리핑' : language === 'CN' ? '案件实地勘查进度' : 'FIELD DETECTIVE STATUS LOG'}</span>
+                <span className="text-[9px] text-zinc-500 font-mono">23:45 UTC</span>
               </h3>
 
-              <div className="flex flex-col gap-2">
-                {(['LivingRoom', 'Hallway', 'Kitchen', 'Bedroom', 'WineCellar'] as LocationKey[]).map(loc => {
-                  const isCurrent = playerLocation === loc;
-                  const npcInUnit = Object.values(SUSPECTS_DATA).find(n => n.location === loc);
+              <div className="space-y-3">
+                {/* Stats list */}
+                <div className="space-y-1.5 border-b border-zinc-900/60 pb-2.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-zinc-500">{language === 'KR' ? '지목 가능 용의자' : language === 'CN' ? '嫌疑嫌犯人数' : 'TOTAL SUSPECTS'}:</span>
+                    <span className="font-bold text-gray-200">5 Persons</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-zinc-500">{language === 'KR' ? '발견된 단서' : language === 'CN' ? '已搜集线索' : 'DISCOVERED CLUES'}:</span>
+                    <span className="font-bold text-red-500">{discoveredClues.length} / {INITIAL_CLUES.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-zinc-500">{language === 'KR' ? '수조 조사 여부' : language === 'CN' ? '厨房异常放水' : 'FAUCET INSPECTED'}:</span>
+                    <span className={`font-bold ${faucetInvestigated ? 'text-cyan-400' : 'text-zinc-650'}`}>
+                      {faucetInvestigated 
+                        ? (language === 'KR' ? '조완 💧' : language === 'CN' ? '已完成调查 💧' : 'YES 💧') 
+                        : (language === 'KR' ? '미조사' : language === 'CN' ? '未搜查' : 'NOT YET')}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-zinc-500">{language === 'KR' ? '목걸이 회수 여부' : language === 'CN' ? '夜鸦之眼锁定' : 'NECKLACE SECURED'}:</span>
+                    <span className={`font-bold ${necklaceFound ? 'text-amber-500' : 'text-zinc-650'}`}>
+                      {necklaceFound ? 'SECURED 💎' : 'LOST'}
+                    </span>
+                  </div>
+                </div>
 
-                  return (
-                    <button
-                      key={loc}
-                      id={`nav-btn-${loc}`}
-                      onClick={() => handleMoveLocation(loc)}
-                      className={`w-full p-3 rounded-xl border text-left transition flex items-center justify-between cursor-pointer active:scale-98 ${
-                        isCurrent
-                          ? 'border-red-600/50 bg-[#fb7185]/10 text-red-400 font-extrabold shadow-sm'
-                          : 'border-zinc-8ab hover:border-zinc-700 hover:bg-zinc-900 bg-zinc-950/30'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-red-500 animate-ping' : 'bg-zinc-700'}`} />
-                        <span className="text-xs font-sans tracking-wide">
-                          {t[loc]}
-                        </span>
-                      </div>
-                      {npcInUnit && (
-                        <span className="text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-550 px-2 py-0.5 rounded font-mono uppercase">
-                          👤 {npcInUnit.id === 'Doctor' ? 'Harvey' : npcInUnit.id === 'Butler' ? 'Rudolf' : npcInUnit.id}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                {/* Discovered quick deck block */}
+                <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-900/80 flex flex-col justify-between">
+                  <span className="text-[8px] font-mono text-zinc-550 tracking-wider block uppercase mb-1">
+                    {language === 'KR' ? '최신 발견된 단서 목록' : language === 'CN' ? '最新收集的关键勘验' : 'LATEST HOTSPOT CLUES'}
+                  </span>
+                  <div className="overflow-y-auto max-h-[85px] space-y-1 pr-0.5">
+                    {discoveredClues.slice(-3).map(id => {
+                      const clue = INITIAL_CLUES.find(c => c.id === id);
+                      if (!clue) return null;
+                      return (
+                        <div key={id} className="text-[9px] text-zinc-400 flex items-center gap-1">
+                          <span className="text-red-500 shrink-0">▪</span>
+                          <span className="truncate">{clue.title[language]}</span>
+                        </div>
+                      );
+                    })}
+                    {discoveredClues.length === 0 && (
+                      <span className="text-[8px] text-zinc-650 italic block py-1.5 text-center">
+                        {language === 'KR' ? '[ 아직 발견된 단서가 없습니다 ]' : language === 'CN' ? '[ 暂无搜寻到的关键线索 ]' : '[ NO DISCOVERED CLUES ]'}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -117,7 +117,7 @@ export interface GameState {
   deducedResults: string[]; // rule ids completed
   necklaceFound: boolean;
   activeDialogueNpcId: string | null;
-  dialogueHistory: { speaker: string; text: string; isAi: boolean }[];
+  dialogueHistory: { speaker: Record<Language, string> | string; text: Record<Language, string> | string; isAi: boolean }[];
   accusationAttempts: number;
   isGameOver: boolean;
   endingType: 'perfect' | 'hidden' | 'ordinary' | 'failed' | 'misjudgment' | 'allsuspect' | null;
