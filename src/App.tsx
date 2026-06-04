@@ -25,7 +25,7 @@ import VisitorJSON from './data/fallback/Visitor.json';
 import bgJSON from './data/fallback/bg.json';
 import bgStartJSON from './data/fallback/bgStart.json';
 import playerJSON from './data/fallback/player.json';
-import { calculateStressImpact, generateOfflineSmartResponse } from './utils/dialogFallback';
+import { calculateStressImpact, generateOfflineSmartResponse, parseDriveLink } from './utils/dialogFallback';
 import LogicBoard from './components/LogicBoard';
 import ManualModal from './components/ManualModal';
 import DialogueBox from './components/DialogueBox';
@@ -192,8 +192,11 @@ export default function App() {
       };
       const code = stateMap[playerLocation];
       const match = sheetData.bg.find((row: any) => row.state === code);
-      if (match && match.resolvedLink) {
-        return match.resolvedLink;
+      if (match) {
+        const urlValue = match.resolvedLink || match.link;
+        if (urlValue) {
+          return parseDriveLink(urlValue);
+        }
       }
     }
     // Static Fallbacks design
@@ -209,7 +212,7 @@ export default function App() {
 
   const getStartBackground = (): string => {
     if (sheetData && sheetData.bgStart && sheetData.bgStart[0]) {
-      return sheetData.bgStart[0].resolvedLink || sheetData.bgStart[0].link;
+      return parseDriveLink(sheetData.bgStart[0].resolvedLink || sheetData.bgStart[0].link);
     }
     return 'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?auto=format&fit=crop&q=80&w=1200';
   };
@@ -254,8 +257,11 @@ export default function App() {
       else if (playerAvatar === 'ConfidentAvatar') code = '1';
 
       const match = sheetData.player.find((row: any) => row.state === code);
-      if (match && match.resolvedLink) {
-        return match.resolvedLink;
+      if (match) {
+        const urlValue = match.resolvedLink || match.link;
+        if (urlValue) {
+          return parseDriveLink(urlValue);
+        }
       }
     }
     return 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=500';
@@ -271,8 +277,14 @@ export default function App() {
     if (sheetRows) {
       const standRow = sheetRows.find((r: any) => r.state === '0');
       const angryRow = sheetRows.find((r: any) => r.state === '1');
-      if (standRow) liveAvatar = standRow.resolvedLink;
-      if (angryRow) liveOutburstAvatar = angryRow.resolvedLink;
+      if (standRow) {
+        const urlV = standRow.resolvedLink || standRow.link;
+        if (urlV) liveAvatar = parseDriveLink(urlV);
+      }
+      if (angryRow) {
+        const urlV = angryRow.resolvedLink || angryRow.link;
+        if (urlV) liveOutburstAvatar = parseDriveLink(urlV);
+      }
     }
 
     // Default graphics in case Google Drive fails
@@ -354,7 +366,7 @@ export default function App() {
       
       let driveItemImage = '';
       if (sheetData && sheetData.Item && sheetData.Item[0]) {
-        driveItemImage = sheetData.Item[0].resolvedLink;
+        driveItemImage = parseDriveLink(sheetData.Item[0].resolvedLink || sheetData.Item[0].link);
       }
 
       setNecklaceFound(true);

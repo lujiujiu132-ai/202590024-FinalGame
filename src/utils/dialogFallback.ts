@@ -1,6 +1,24 @@
 // Local offline dialogue simulation engine for Midnight Suspicion
 // Fully supports English, Korean, and Chinese with reactive emotional thresholds.
 
+export function parseDriveLink(link: string | undefined): string {
+  if (!link) return '';
+  let id = '';
+  const matchD = link.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (matchD) {
+    id = matchD[1];
+  } else {
+    const matchId = link.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (matchId) {
+      id = matchId[1];
+    }
+  }
+  if (id) {
+    return `https://lh3.googleusercontent.com/d/${id}`;
+  }
+  return link;
+}
+
 export function calculateStressImpact(text: string, lang: string): number {
   const query = text.toLowerCase();
   
