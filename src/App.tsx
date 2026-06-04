@@ -16,6 +16,16 @@ import {
 } from './types';
 import { LOCALIZED_STRINGS, INITIAL_CLUES, COMBINATION_RULES, SUSPECTS_DATA } from './data/story';
 import { gameAudio } from './utils/audio';
+import ButlerJSON from './data/fallback/Butler.json';
+import DoctorJSON from './data/fallback/Doctor.json';
+import ItemJSON from './data/fallback/Item.json';
+import MaidJSON from './data/fallback/Maid.json';
+import NieceJSON from './data/fallback/Niece.json';
+import VisitorJSON from './data/fallback/Visitor.json';
+import bgJSON from './data/fallback/bg.json';
+import bgStartJSON from './data/fallback/bgStart.json';
+import playerJSON from './data/fallback/player.json';
+import { calculateStressImpact, generateOfflineSmartResponse } from './utils/dialogFallback';
 import LogicBoard from './components/LogicBoard';
 import ManualModal from './components/ManualModal';
 import DialogueBox from './components/DialogueBox';
@@ -31,7 +41,8 @@ import {
   HelpCircle,
   TrendingUp,
   RefreshCw,
-  X
+  X,
+  Sliders
 } from 'lucide-react';
 
 export default function App() {
@@ -40,6 +51,7 @@ export default function App() {
   const [playerLocation, setPlayerLocation] = useState<LocationKey>('LivingRoom');
   const [playerAvatar, setPlayerAvatar] = useState<PlayerAvatarState>('StandAvatar');
   const [discoveredClues, setDiscoveredClues] = useState<string[]>([]);
+  const [investigatedHotspots, setInvestigatedHotspots] = useState<string[]>([]);
   const [evidenceInventory, setEvidenceInventory] = useState<EvidenceItem[]>([]);
   const [necklaceFound, setNecklaceFound] = useState(false);
   const [activeDialogueNpcId, setActiveDialogueNpcId] = useState<string | null>(null);
@@ -48,7 +60,20 @@ export default function App() {
   const [accusationAttempts, setAccusationAttempts] = useState(3);
   const [isGameOver, setIsGameOver] = useState(false);
   const [endingType, setEndingType] = useState<GameState['endingType']>(null);
+  const [culpritId, setCulpritId] = useState<string>(() => {
+    const list = ['Butler', 'Maid', 'Visitor', 'Niece', 'Doctor'];
+    return list[Math.floor(Math.random() * list.length)];
+  });
   
+  // Real-time dynamic NPC emotional and outbursts state tracker
+  const [rawNPCStates, setRawNPCStates] = useState<Record<string, { emotion: number; isOutburst: boolean }>>({
+    Butler: { emotion: 35, isOutburst: false },
+    Maid: { emotion: 15, isOutburst: false },
+    Visitor: { emotion: 40, isOutburst: false },
+    Niece: { emotion: 48, isOutburst: false },
+    Doctor: { emotion: 55, isOutburst: false }
+  });
+
   // Game screens
   const [gameStarted, setGameStarted] = useState(false);
   const [showHandbook, setShowHandbook] = useState(false);
@@ -67,14 +92,41 @@ export default function App() {
   const [pinboardConnections, setPinboardConnections] = useState<[string, string][]>([]);
   const [deducedResults, setDeducedResults] = useState<string[]>([]);
 
-  // Sound configuration
+   // Sound configuration
   const [isMuted, setIsMuted] = useState(true); // Default muted to comply with browser autoplay terms
+  const [ambientVolume, setAmbientVolumeState] = useState(() => gameAudio.getAmbientVolume());
+  const [bgmVolume, setBgmVolumeState] = useState(() => gameAudio.getBgmVolume());
+  const [bgmTrack, setBgmTrackState] = useState(() => gameAudio.getCurrentBgmTrack());
+  const [showSettingsPopover, setShowSettingsPopover] = useState(false);
+
+  // Custom high-energy alert state and evidence result popup states
+  const [highEnergyClue, setHighEnergyClue] = useState<any | null>(null);
+  const [evidenceFeedback, setEvidenceFeedback] = useState<{ isCorrect: boolean; npcName: string; text: string; image?: string } | null>(null);
+  const [feedbackPopup, setFeedbackPopup] = useState<{
+    isOpen: boolean;
+    type: 'success' | 'error';
+    title: Record<Language, string>;
+    message: Record<Language, string>;
+    isPinboard: boolean;
+  } | null>(null);
 
   // Translation sets helper
   const t = LOCALIZED_STRINGS[language];
 
   // Load Google Sheet resource dataset dynamically
   useEffect(() => {
+    const OFFLINE_FALLBACK_DATA = {
+      Butler: ButlerJSON,
+      Doctor: DoctorJSON,
+      Item: ItemJSON,
+      Maid: MaidJSON,
+      Niece: NieceJSON,
+      Visitor: VisitorJSON,
+      bg: bgJSON,
+      bgStart: bgStartJSON,
+      player: playerJSON
+    };
+
     async function loadSheets() {
       try {
         const res = await fetch('/api/sheet-data');
@@ -85,7 +137,8 @@ export default function App() {
           throw new Error('Fallback triggered');
         }
       } catch (err) {
-        console.warn('Live Google Sheets offline, falling back directly...');
+        console.warn('Live Google Sheets offline, falling back directly to local static JSONs...', err);
+        setSheetData(OFFLINE_FALLBACK_DATA);
       } finally {
         setSheetLoading(false);
       }
@@ -93,18 +146,24 @@ export default function App() {
     loadSheets();
   }, []);
 
-  // Sync mute state with Audio manager
+  // Synchronize audio parameters and location-specific ambient loops
   useEffect(() => {
     gameAudio.setMute(isMuted);
     if (!isMuted && gameStarted) {
       gameAudio.startAmbientRain();
+      gameAudio.startAmbientRoom(playerLocation);
+      gameAudio.startBgm();
     } else {
       gameAudio.stopAmbientRain();
+      gameAudio.stopAmbientRoom();
+      gameAudio.stopBgm();
     }
     return () => {
       gameAudio.stopAmbientRain();
+      gameAudio.stopAmbientRoom();
+      gameAudio.stopBgm();
     };
-  }, [isMuted, gameStarted]);
+  }, [isMuted, gameStarted, playerLocation]);
 
   // Handle auto footstep toggle and animation on location transition
   const handleMoveLocation = (target: LocationKey) => {
@@ -191,15 +250,14 @@ export default function App() {
     if (sheetData && sheetData.player) {
       let code = '0'; // Stand
       if (playerAvatar === 'WalkAvatar') code = '1';
-      else if (playerAvatar === 'ThinkAvatar') code = '0'; // default uses stand
-      else if (playerAvatar === 'ConfidentAvatar') code = '1'; // confident uses state 1 or standard
+      else if (playerAvatar === 'ThinkAvatar') code = '0';
+      else if (playerAvatar === 'ConfidentAvatar') code = '1';
 
       const match = sheetData.player.find((row: any) => row.state === code);
       if (match && match.resolvedLink) {
         return match.resolvedLink;
       }
     }
-    // High-resolution artistic silhouette fallback
     return 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=500';
   };
 
@@ -225,7 +283,7 @@ export default function App() {
       },
       Maid: {
         std: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=500',
-        out: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=500' // Clara
+        out: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=500'
       },
       Visitor: {
         std: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=500',
@@ -241,26 +299,16 @@ export default function App() {
       }
     };
 
-    const fbSet = faceFallbacks[npcId] || faceFallbacks.Butler;
+    const npcState = rawNPCStates[npcId] || { emotion: 30, isOutburst: false };
 
     return {
       ...raw,
-      avatar: liveAvatar || fbSet.std,
-      outburstAvatar: liveOutburstAvatar || fbSet.out,
-      // Overwrite live values from rawNPCStates controller
-      isOutburst: (rawNPCStates[npcId]?.isOutburst || false),
-      emotion: (rawNPCStates[npcId]?.emotion ?? 35)
+      emotion: npcState.emotion,
+      isOutburst: npcState.isOutburst,
+      avatar: liveAvatar || faceFallbacks[npcId]?.std || '',
+      outburstAvatar: liveOutburstAvatar || faceFallbacks[npcId]?.out || ''
     } as NPC;
   };
-
-  // Suspects state engine within controller
-  const [rawNPCStates, setRawNPCStates] = useState<Record<string, { emotion: number; isOutburst: boolean }>>({
-    Butler: { emotion: 35, isOutburst: false },
-    Maid: { emotion: 15, isOutburst: false },
-    Visitor: { emotion: 40, isOutburst: false },
-    Niece: { emotion: 48, isOutburst: false },
-    Doctor: { emotion: 55, isOutburst: false }
-  });
 
   // Scene search hotspot coordinates mapping
   const roomHotspots: Record<LocationKey, { id: string; name: Record<Language, string>; x: string; y: string; clueId: string }[]> = {
@@ -271,29 +319,34 @@ export default function App() {
     ],
     Hallway: [
       { id: 'carpet', name: { KR: '안뜰 고급 깔개', CN: '门厅吸水地毯', EN: 'Muddy Hallway Carpet' }, x: '45%', y: '80%', clueId: 'footsteps' },
-      { id: 'mural', name: { KR: '고미술 렉시 벽화', CN: '雷斯利油画壁挂', EN: 'Leslie Historical Mural' }, x: '15%', y: '32%', clueId: 'butler_lie' },
-      { id: 'clock', name: { KR: '자명 괘종시계', CN: '欧式古典立钟', EN: 'Grandfather Stand Clock' }, x: '82%', y: '38%', clueId: 'dripping_sound' }
+      { id: 'mural', name: { KR: '레이스리 유화 벽화', CN: '雷스리油画壁挂', EN: 'Leslie Historical Mural' }, x: '15%', y: '32%', clueId: 'mural_clue' },
+      { id: 'clock', name: { KR: '자명 괘종시계', CN: '欧式古典立钟', EN: 'Grandfather Stand Clock' }, x: '82%', y: '38%', clueId: 'clock_clue' }
     ],
     Kitchen: [
       { id: 'faucet', name: { KR: '수조 물막 수돗가', CN: '放水的水龙头', EN: 'Rushing Kitchen Faucet' }, x: '35%', y: '48%', clueId: 'dripping_sound' },
-      { id: 'kniferack', name: { KR: '연구용 칼 거치대', CN: '主厨剔骨刀架', EN: 'Culinary Knife Block' }, x: '18%', y: '55%', clueId: 'footsteps' },
-      { id: 'dinetable', name: { KR: '대식 식탁 상판', CN: '拼边餐洗礼桌', EN: 'Pine Dining Table' }, x: '68%', y: '65%', clueId: 'dripping_sound' }
+      { id: 'kniferack', name: { KR: '연구용 칼 거치대', CN: '主厨剔骨刀架', EN: 'Culinary Knife Block' }, x: '18%', y: '55%', clueId: 'kniferack_clue' },
+      { id: 'dinetable', name: { KR: '대식 식탁 상판', CN: '拼边餐洗礼桌', EN: 'Pine Dining Table' }, x: '68%', y: '65%', clueId: 'dinetable_clue' },
+      { id: 'hiddendoor', name: { KR: '★ 주방 비밀 벽 찬장 ★', CN: '★ 厨房排水口暗格 ★', EN: '★ Kitchen Hidden Drain Compartment ★' }, x: '50%', y: '25%', clueId: 'necklace_hidden' }
     ],
     Bedroom: [
       { id: 'diary', name: { KR: '자물 서랍장 비밀 일기', CN: '密封的皮质日记本', EN: 'Family Heritage Diary' }, x: '55%', y: '52%', clueId: 'niece_diary' },
-      { id: 'drawer', name: { KR: '침대 화장장 서랍', CN: '床头备用抽屉', EN: 'Bedside Night Drawer' }, x: '28%', y: '68%', clueId: 'niece_diary' },
-      { id: 'lamp', name: { KR: '유황 오팔 스탠드', CN: '床头复古铜绿台灯', EN: 'Polished Brass Desk Lamp' }, x: '80%', y: '45%', clueId: 'broken_cabinet' }
+      { id: 'drawer', name: { KR: '침대 화장장 서랍', CN: '床头备用抽屉', EN: 'Bedside Night Drawer' }, x: '28%', y: '68%', clueId: 'drawer_clue' },
+      { id: 'lamp', name: { KR: '유황 오팔 스탠드', CN: '床头复古铜绿台灯', EN: 'Polished Brass Desk Lamp' }, x: '80%', y: '45%', clueId: 'lamp_clue' }
     ],
     WineCellar: [
-      { id: 'barrel', name: { KR: '진수성찬 맥주통', CN: '堆积的空啤酒桶', EN: 'Fermented Beer Barrels' }, x: '20%', y: '62%', clueId: 'doctor_motive' },
-      { id: 'winerack', name: { KR: '철제 고유 와인랙', CN: '陈年白兰地酒架', EN: 'Ancient Mahogany Wine Rack' }, x: '72%', y: '42%', clueId: 'doctor_motive' },
-      { id: 'hiddendoor', name: { KR: '★ 빗장 지층 틈막 문 ★', CN: '★ 地底下秘锁石门 ★', EN: '★ Sealed Sub-floor Vault ★' }, x: '50%', y: '50%', clueId: 'necklace_hidden' }
+      { id: 'barrel', name: { KR: '진수성찬 맥주통', CN: '堆积의공 맥주통', EN: 'Fermented Beer Barrels' }, x: '20%', y: '62%', clueId: 'doctor_motive' },
+      { id: 'winerack', name: { KR: '철제 고유 와인랙', CN: '陈年白兰地酒架', EN: 'Ancient Mahogany Wine Rack' }, x: '72%', y: '42%', clueId: 'winerack_clue' },
+      { id: 'groundgrate', name: { KR: '지하 철제 석탄고 격쇠', CN: '지하 냉고 철격자', EN: 'Rust Iron Sub-floor Grate' }, x: '51%', y: '51%', clueId: 'groundgrate_clue' }
     ]
   };
 
   // Clicking an active hotspot triggers investigation
   const handleInvestigateHotspot = (spot: typeof roomHotspots.LivingRoom[0]) => {
     gameAudio.playPencilWrite();
+    
+    if (!investigatedHotspots.includes(spot.id)) {
+      setInvestigatedHotspots(prev => [...prev, spot.id]);
+    }
     
     // Check if finding the actual stolen "Night Raven Eye" necklace item
     if (spot.clueId === 'necklace_hidden') {
@@ -368,21 +421,60 @@ export default function App() {
       r.clueIds.includes(selectedIds[0]) && r.clueIds.includes(selectedIds[1])
     );
 
-    if (rule && !deducedResults.includes(rule.id)) {
-      gameAudio.playGlassShatter();
-      setDeducedResults(prev => [...prev, rule.id]);
-      
-      // Auto unlock deep logical inference clue
-      if (!discoveredClues.includes(rule.resultClueId)) {
-        setDiscoveredClues(prev => [...prev, rule.resultClueId]);
+    if (rule) {
+      if (!deducedResults.includes(rule.id)) {
+        gameAudio.playGlassShatter();
+        setDeducedResults(prev => [...prev, rule.id]);
+        
+        // Auto unlock deep logical inference clue
+        if (!discoveredClues.includes(rule.resultClueId)) {
+          setDiscoveredClues(prev => [...prev, rule.resultClueId]);
+        }
       }
 
-      // Beautiful customized success popup Alert
+      // Establishes physical red thread ONLY on correct pairing
+      handlePinboardAddConnection(selectedIds[0], selectedIds[1]);
+
+      const successTitle: Record<Language, string> = {
+        KR: "💡 논리 결합 성공!",
+        CN: "💡 逻辑链条碰撞成功！",
+        EN: "💡 Logical Link Success!"
+      };
       const alertMsg = rule.alertMessage[language] || rule.alertMessage['KR'];
-      alert(alertMsg);
+
+      setFeedbackPopup({
+        isOpen: true,
+        type: 'success',
+        title: successTitle,
+        message: {
+          KR: alertMsg,
+          CN: alertMsg,
+          EN: alertMsg
+        },
+        isPinboard: true
+      });
     } else {
-      // Just normal thread connected sound
+      // Failed to link - Incorrect combination, show error pop-up and do NOT call handlePinboardAddConnection
       gameAudio.playPencilWrite();
+
+      const errorTitle: Record<Language, string> = {
+        KR: "❌ 논리 결합 실패",
+        CN: "❌ 逻辑碰撞失败",
+        EN: "❌ Deduction Link Failed"
+      };
+      const errorMsg: Record<Language, string> = {
+        KR: "선택한 두 단서 사이에 명확한 논리적 모순이나 상관관계를 찾을 수 없어서 붉은 실을 연결할 수 없습니다. 다시 시도해 보세요!",
+        CN: "选中的这两个线索卡片之间不具备逻辑因果关系，无法建立红线连接。请重新思考组合！",
+        EN: "No valid logical causality or contradiction between these two clues. Refusing to connect visual red thread. Try other options!"
+      };
+
+      setFeedbackPopup({
+        isOpen: true,
+        type: 'error',
+        title: errorTitle,
+        message: errorMsg,
+        isPinboard: true
+      });
     }
   };
 
@@ -441,9 +533,37 @@ export default function App() {
         if (json.isOutburst) {
           gameAudio.playHeartbeat();
         }
+      } else {
+        throw new Error('API non-success');
       }
     } catch (err) {
-      console.error('Interrogation request issue: ', err);
+      console.warn('Network API chat issue, falling back to local smart NPC response generator in browser:', err);
+      // Run the client-side simulated dialogue engine
+      const stressAddition = calculateStressImpact(text, language || 'KR');
+      const newEmotion = Math.min(100, Math.max(0, (activeNpc.emotion || 0) + stressAddition));
+      const newlyTriggeredOutburst = newEmotion >= 75;
+      const replyText = generateOfflineSmartResponse(activeDialogueNpcId, text, language, newEmotion, newlyTriggeredOutburst);
+
+      // Apply local client state updates
+      setRawNPCStates(prev => ({
+        ...prev,
+        [activeDialogueNpcId]: {
+          emotion: newEmotion,
+          isOutburst: newlyTriggeredOutburst
+        }
+      }));
+
+      setDialogueHistory(prev => ({
+        ...prev,
+        [activeDialogueNpcId]: [
+          ...(prev[activeDialogueNpcId] || []),
+          { speaker: activeNpc.name[language], text: replyText, isAi: true }
+        ]
+      }));
+
+      if (newlyTriggeredOutburst) {
+        gameAudio.playHeartbeat();
+      }
     } finally {
       setIsChatLoading(false);
     }
@@ -480,7 +600,24 @@ export default function App() {
         ]
       }));
 
-      alert(successText);
+      // Beautiful customized success popup modal
+      const successTitle: Record<Language, string> = {
+        KR: "⚖️ 결정적 모순 돌파 성공!",
+        CN: "⚖️ 决定性指控突破成功！",
+        EN: "⚖️ Decisive Confrontation Success!"
+      };
+
+      setFeedbackPopup({
+        isOpen: true,
+        type: 'success',
+        title: successTitle,
+        message: {
+          KR: successText,
+          CN: successText,
+          EN: successText
+        },
+        isPinboard: false
+      });
     } else {
       // Failed objection mismatch - raises stress lightly but doesn't break alibi
       gameAudio.playPencilWrite();
@@ -496,7 +633,7 @@ export default function App() {
       });
 
       const mismatchResponses: Record<Language, string> = {
-        KR: "“흠, 그것이 저와슨 무슨 관련이 있다는 겁니까? 무고한 사람을 성급하게 물어뜯지 마십시오 탐정님.”",
+        KR: "“흠, 그것이 저와 무슨 관련이 있다는 겁니까? 무고한 사람을 성급하게 물어뜯지 마십시오 탐정님.”",
         CN: "“……侦探，您拿出的这件证物莫名其妙。它与我所坚称的时间段毫无矛盾，请不要无理取闹。”",
         EN: "“...And what does that have to do with me, Detective? Do not throw random items on trial without real connections.”"
       };
@@ -508,6 +645,25 @@ export default function App() {
           { speaker: activeNpc.name[language], text: mismatchResponses[language], isAi: true }
         ]
       }));
+
+      // Beautiful customized incorrect popup modal
+      const errorTitle: Record<Language, string> = {
+        KR: "❌ 증거 제시 실패",
+        CN: "❌ 呈堂证物不正确",
+        EN: "❌ Incorrect Evidence Selection"
+      };
+
+      setFeedbackPopup({
+        isOpen: true,
+        type: 'error',
+        title: errorTitle,
+        message: {
+          KR: `${activeNpc.name[language]}: ${mismatchResponses.KR}`,
+          CN: `${activeNpc.name[language]}：${mismatchResponses.CN}`,
+          EN: `${activeNpc.name[language]}: ${mismatchResponses.EN}`
+        },
+        isPinboard: false
+      });
     }
   };
 
@@ -516,26 +672,28 @@ export default function App() {
     setShowAccuseModal(false);
     gameAudio.playGavel();
 
-    const perfectCulprit = 'Doctor';
-    const hasMeltingClue = discoveredClues.includes('chemical_theft');
+    const hasMotiveClue = (() => {
+      if (culpritId === 'Doctor') return discoveredClues.includes('chemical_theft');
+      if (culpritId === 'Butler' || culpritId === 'Visitor') return discoveredClues.includes('theft_partners');
+      if (culpritId === 'Maid') return discoveredClues.includes('water_cover');
+      if (culpritId === 'Niece') return discoveredClues.includes('niece_diary') || discoveredClues.includes('lamp_clue');
+      return false;
+    })();
 
-    if (accuseSelectedNpcId === perfectCulprit) {
-      if (necklaceFound && hasMeltingClue) {
+    if (accuseSelectedNpcId === culpritId) {
+      if (necklaceFound && hasMotiveClue) {
         setEndingType('hidden'); // Perfect family conspiracy mastermind outcome
       } else if (necklaceFound) {
         setEndingType('perfect'); // Captured, but missing full evidence backstory
       } else {
         setEndingType('ordinary'); // Caught, but jewel remaining unfound
       }
-    } else if (accuseSelectedNpcId === 'Butler' || accuseSelectedNpcId === 'Visitor') {
-      const accompliceInferences = deducedResults.includes('rule_partners');
-      if (accompliceInferences) {
+    } else {
+      if (deducedResults.length > 0) {
         setEndingType('ordinary'); // Solved the accomplice branch halfway
       } else {
         setEndingType('misjudgment'); // Misfire on accomplice without proof
       }
-    } else {
-      setEndingType('misjudgment'); // Accusing harmless Clara or Niece
     }
 
     setIsGameOver(true);
@@ -547,6 +705,7 @@ export default function App() {
     setPlayerLocation('LivingRoom');
     setPlayerAvatar('StandAvatar');
     setDiscoveredClues([]);
+    setInvestigatedHotspots([]);
     setEvidenceInventory([]);
     setNecklaceFound(false);
     setActiveDialogueNpcId(null);
@@ -559,6 +718,13 @@ export default function App() {
     setShowLogicBoardModal(false);
     setFaucetInvestigated(false);
     setExaminedClue(null);
+    setFeedbackPopup(null);
+    
+    // Choose a brand new randomized culprit for the next playthrough round
+    const list = ['Butler', 'Maid', 'Visitor', 'Niece', 'Doctor'];
+    const newCulprit = list[Math.floor(Math.random() * list.length)];
+    setCulpritId(newCulprit);
+
     setRawNPCStates({
       Butler: { emotion: 35, isOutburst: false },
       Maid: { emotion: 15, isOutburst: false },
@@ -567,6 +733,87 @@ export default function App() {
       Doctor: { emotion: 55, isOutburst: false }
     });
   };
+
+  // Resume the same game progress without erasing any evidence/clues/status
+  const handleResumeInvestigation = () => {
+    gameAudio.playPencilWrite();
+    setIsGameOver(false);
+    setEndingType(null);
+    setAccusationAttempts(3); // Refill accusation attempts so they can try different logic / suspects
+  };
+
+  const getEndingTexts = () => {
+    // Suspect names translation helper
+    const getSuspectName = (id: string) => {
+      const names: Record<string, Record<Language, string>> = {
+        Butler: { KR: "루돌프 (Rudolf / 집사)", CN: "管家雷德菲尔德", EN: "Butler Rudolf" },
+        Maid: { KR: "클라라 (Clara / 메이드)", CN: "女佣安娜", EN: "Maid Clara" },
+        Visitor: { KR: "방문객 (Visitor / 아서)", CN: "外来访客", EN: "Visitor" },
+        Niece: { KR: "벨라 (Bella / 조카)", CN: "侄女塞西莉亚", EN: "Niece Bella" },
+        Doctor: { KR: "하비 박사 (Dr. Harvey / 주치의)", CN: "私人医生哈维", EN: "Doctor Harvey" }
+      };
+      return names[id]?.[language] || id;
+    };
+
+    const culpritName = getSuspectName(culpritId);
+
+    const hiddenTexts: Record<Language, string> = {
+      KR: culpritId === 'Doctor'
+        ? `당신은 마침내 단순 도난극을 넘은 가문 피라미드의 역사적 원한을 폭로했습니다! 소지하고 있던 《야까마귀의 눈》을 통해 주치의 하비 박사가 사실 영주의 서자로 자라나 복수를 도모했음이 밝혀 지며 가문 내부의 가해 관계를 해제하고 완승했습니다.`
+        : culpritId === 'Butler'
+        ? `당신은 마침내 저택 사정에 밝은 집사 루돌프의 치밀한 도난 음모를 폭로했습니다! 수집한 《야까마귀의 눈》과 그가 방문객과 공모해 허위 알리바이를 조작했던 증거를 제출하자, 그는 빚을 탕감하기 위해 가문의 성물을 외부 브로커에게 넘기려 했음을 자백했습니다!`
+        : culpritId === 'Visitor'
+        ? `당신은 마침내 외지인 방문객의 은밀한 보물 침탈 음모를 완전히 밝혀냈습니다! 《야까마귀의 눈》 목걸이 실물과 새벽 국제 탈출 선박 티켓, 그리고 집사를 회유해 뒷문을 열게 한 공모 흔적을 밀어붙이자 그는 불법 골동품 밀매 배후를 실토했습니다!`
+        : culpritId === 'Maid'
+        ? `당신은 마침내 성실해 보였던 메이드 클라라의 반전 절도 계획을 폭로했습니다! 정원 수해 기믹으로 유수음을 발생시켜 지하시실 진입 소음을 가리고 《야까마귀의 눈》을 빼돌린 완벽한 알리바이를 깨부수자, 그녀는 오랜 처우에 대한 원한으로 유물을 쟁취하려 했음을 시인했습니다!`
+        : `당신은 마침내 대저택의 상속녀 조카 벨라의 어두운 충동을 밝혀냈습니다! 밤새 그녀가 침실 밖을 나와 활동한 지문 추적과 극비 일기장에 드러난 유산 분쟁 원망을 들이대며 《야까마귀의 눈》을 회수하자, 벨라는 자신의 합법적 상속분을 영주가 숨기려 해 직접 도포했음을 자백했습니다!`,
+      CN: culpritId === 'Doctor'
+        ? `您成功锁定了罪犯私人医生哈维！并且凭借搜集到的《夜鸦之眼》物证与对药化学实验室有机溶剂无声消融挂锁的完整推理，哈维见证据确凿瘫坐倒地，供认出了他身为领主私生子为了夺回圣器并洗劫保险箱的惊天家族阴谋！您达成了隐藏完美结局！`
+        : culpritId === 'Butler'
+        ? `您成功锁定了罪犯管家雷德菲尔德！并且凭借搜集到的《夜鸦之眼》物证与对其同伙阴谋、虚报时间线的完整推断，管家在铁证前终于痛哭流涕，承认自己因为巨额债务利用对大宅地形的绝对熟悉，在深夜偷窃了项链并藏于厨房！您达成了隐藏完美结局！`
+        : culpritId === 'Visitor'
+        ? `您成功锁定了罪犯外来访客！并且凭借搜集到的《夜鸦之眼》物证与获悉他购买凌晨国际逃亡船票并诱导管家开门协助的完整铁证，访客在最后的审判中哑口无言，无奈交待了他作为境外文物黑市代理人策划洗劫大宅的完整阴谋！您达成了隐藏完美结局！`
+        : culpritId === 'Maid'
+        ? `您成功锁定了罪犯年轻女佣安娜！并且凭借搜集到的《夜鸦之眼》物证以及揭开她在厨房故意放水掩盖赤脚潜下地下室藏宝的精确推论，这名平日看似温顺的少女终于崩溃承认，她因为对长期的剥削和微薄薪水心存怨恨，决定在深夜大雨时盗宝，达成完美反击！您达成了隐藏完美结局！`
+        : `您成功锁定了罪犯家族侄女塞西莉亚！并且凭借搜集到的《夜鸦之眼》首饰以及从她闺房日记中发现的夺产偏执倾向和台灯金属屑的指纹痕迹，大小姐终于在惊恐中交待，为了夺回她坚信属于自己合法继承的家族财富，在深夜亲手窃取了项链并隐匿于后厨！您达成了隐藏完美结局！`,
+      EN: culpritId === 'Doctor'
+        ? `You successfully exposed Doctor Harvey! Armed with both the physical night-raven eye necklace and clinical organic solvent melting formulas, you unraveled he is the long-lost heir of the Raven line plotting legacy recovery. Outstanding detective work!`
+        : culpritId === 'Butler'
+        ? `You successfully exposed Butler Rudolf! Armed with the physical night-raven eye necklace and evidence of his fabricated timeline collusion, the loyal-looking servant confessed to exploiting his intimate knowledge of the estate to execute the theft of the year to settle his debts!`
+        : culpritId === 'Visitor'
+        ? `You successfully exposed the international Visitor! Armed with the physical night-raven eye necklace and his designated getaway channel shipping ticket, you shattered his tourist alibi; he finally conceded he was a professional art thief targeting the Raven legacy!`
+        : culpritId === 'Maid'
+        ? `You successfully exposed Maid Clara! Armed with the physical night-raven eye necklace and proof that she manufactured the rushing kitchen faucet noise to suppress her wet footsteps down to the cellar, she broke down, admitting her silent revolt against the wealthy estate!`
+        : `You successfully exposed Niece Bella! Armed with the physical night-raven eye necklace and her personal lockbox journal revealing her deep resentment over the estate's heritage, she confessed to sneaking out at midnight to claim what she believed was rightfully hers!`
+    };
+
+    const perfectTexts: Record<Language, string> = {
+      KR: `성공적인 심판! 진짜 범인인 ${culpritName}의 혐의를 입증하고 《야까마귀의 눈》 목걸이를 무사히 회수하는 데 완벽히 성공했습니다! 비록 그가 뒤에서 가책 없이 꾸민 구체적인 배경 음모나 복잡한 무대 비화까지는 전부 드러나지 않았지만, 소중한 유물이 온전하게 귀환되었습니다.`,
+      CN: `审判成功！您指控了真正的作案真凶${culpritName}并搜寻到了锁于后厨的《夜鸦之眼》吊坠。虽然其背后盘根错节的作案动机、完美密室逻辑细节锁链未被您全部抽丝剥茧，但窃贼已经被当场捉获，宝物完璧归赵！`,
+      EN: `Procedural conviction success! You successfully identified the true culprit (${culpritName}) and secured the physical "Night Raven Eye" necklace. Although the deeper motive details remain partly shrouded, justice prevails.`
+    };
+
+    const ordinaryTexts: Record<Language, string> = {
+      KR: `결과가 평이합니다. 당신은 이번 도난 음모의 핵심 관계주체나 알리바이 모순을 유추하는 데는 성공했으나, 결정적 물리적 증물인 《야까마귀의 눈》 목걸이를 회수하지 못하여, 범인이 은밀하게 장물을 이미 외부로 빼돌린 채 혐의를 전면 부인하고 끝났습니다.`,
+      CN: `审判平平。您推断出了嫌疑人或共犯的关联，但由于未能成功翻查出藏匿在厨房水槽暗格的《夜鸦之眼》实物线索，被指控的被告百般抵赖，最核心的世纪项链宝物极有可能已被暗中转移脱手。`,
+      EN: `Case closed with ordinary success. You deduced the timeline or culprits, but because the physical "Night Raven Eye" necklace stayed undiscovered, the suspect evaded complete retrieval, and the gem was likely funneled away.`
+    };
+
+    const mistexts: Record<Language, string> = {
+      KR: `치명적인 재판 오보! 당신은 무고한 인물을 오판 지목했고, 진짜 사건의 주범은 차가운 빗속에서 비웃듯이 회수한 보물 《야까마귀의 눈》을 지닌 채 어둠 속으로 완전히 종적을 감췄습니다. 가문의 무고한 사람에게 누명만 남겨진 최악의 전말입니다.`,
+      CN: `重大冤假错案！法槌重击下您控告了完全无罪之人！而真正的作案主谋在漆黑的大雨深夜里暗自狂笑，早已携带窃取下的《夜鸦之眼》国宝奇珍悄然潜逃脱身。冤屈无处诉说，真凶逍遥法外！`,
+      EN: `A catastrophic misjudgment! You prosecuted a completely innocent person under the gavel, while the actual mastermind escaped unnoticed into the cold night clutching the precious legacy jewel. True culprit walks free!`
+    };
+
+    return {
+      hidden: hiddenTexts[language] || hiddenTexts['KR'],
+      perfect: perfectTexts[language] || perfectTexts['KR'],
+      ordinary: ordinaryTexts[language] || ordinaryTexts['KR'],
+      misjudgment: mistexts[language] || mistexts['KR']
+    };
+  };
+
+  const endingTexts = getEndingTexts();
 
   return (
     <div className="min-h-screen bg-[#07080b] text-gray-200 font-sans flex flex-col relative overflow-x-hidden antialiased select-none selection:bg-red-950/50 selection:text-red-400">
@@ -595,19 +842,104 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Audio Indicator */}
-          <button
-            id="btn-sound-toggle"
-            onClick={() => setIsMuted(prev => !prev)}
-            className={`p-2 rounded-lg border transition cursor-pointer active:scale-95 ${
-              isMuted
-                ? 'border-zinc-800 hover:border-zinc-750 text-zinc-500 bg-zinc-950'
-                : 'border-[#fb7185]/30 hover:border-[#fb7185]/55 text-[#f43f5e] bg-rose-950/20'
-            }`}
-            title="Rain Ambient Audio Control"
-          >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
+          {/* Audio Indicator with Mixer settings */}
+          <div className="relative">
+            <button
+              id="btn-sound-toggle"
+              onClick={() => {
+                gameAudio.playPencilWrite();
+                setShowSettingsPopover(prev => !prev);
+              }}
+              className={`p-2 rounded-lg border transition cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                showSettingsPopover
+                  ? 'border-red-500 text-red-400 bg-[#16171f]'
+                  : isMuted
+                    ? 'border-zinc-800 hover:border-zinc-750 text-zinc-500 bg-zinc-950'
+                    : 'border-[#fb7185]/30 hover:border-[#fb7185]/55 text-[#f43f5e] bg-rose-950/20'
+              }`}
+              title="Audio settings mixer"
+            >
+              <Sliders className="w-4 h-4 animate-pulse" />
+              <span className="text-[11px] font-mono font-bold hidden sm:inline">
+                {language === 'KR' ? '사운드 믹서' : language === 'CN' ? '音频混音器' : 'SOUND MIXER'}
+              </span>
+            </button>
+
+            {showSettingsPopover && (
+              <div
+                id="audio-settings-popover"
+                className="absolute right-0 mt-2.5 w-64 bg-[#0a0c10] border border-zinc-800 rounded-xl p-4 shadow-2xl z-50 text-left animate-slide-in font-sans"
+              >
+                <div className="flex items-center justify-between border-b border-zinc-900 pb-2 mb-3">
+                  <span className="text-xs font-bold text-gray-200 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-red-500" />
+                    {language === 'KR' ? '사운드 설정' : language === 'CN' ? '系统音色调音台' : 'ENVIRONMENT MIXER'}
+                  </span>
+                  <button
+                    onClick={() => setShowSettingsPopover(false)}
+                    className="text-zinc-500 hover:text-zinc-350 p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Master Mute Trigger Choice */}
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs text-zinc-400 font-medium">
+                    {language === 'KR' ? '사운드 마스터 활성화' : language === 'CN' ? '主静音开关' : 'Master Mute / Sound'}
+                  </span>
+                  <button
+                    id="popover-sound-mute-toggle"
+                    onClick={() => setIsMuted(prev => !prev)}
+                    className={`px-2.5 py-1 rounded text-[10px] font-bold font-mono uppercase tracking-wider border transition cursor-pointer active:scale-95 ${
+                      isMuted
+                        ? 'border-zinc-800 text-zinc-500 bg-zinc-950 hover:border-zinc-700'
+                        : 'border-[#fb7185]/30 text-[#f43f5e] bg-rose-950/20'
+                    }`}
+                  >
+                    {isMuted 
+                      ? (language === 'KR' ? '음소거됨' : language === 'CN' ? '静音' : 'MUTED') 
+                      : (language === 'KR' ? '활성화됨' : language === 'CN' ? '开启' : 'ACTIVE')
+                    }
+                  </button>
+                </div>
+
+                {/* Ambient Sound Volume Slider */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-[11px] font-mono text-zinc-400">
+                    <span>
+                      {language === 'KR' ? '배경 분위기 음량' : language === 'CN' ? '场景环境音量' : 'Ambient Volume'}
+                    </span>
+                    <span className="text-red-400 font-bold">
+                      {Math.round(ambientVolume * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={ambientVolume}
+                    disabled={isMuted}
+                    onChange={(e) => {
+                      const vol = parseFloat(e.target.value);
+                      setAmbientVolumeState(vol);
+                      gameAudio.setAmbientVolume(vol);
+                    }}
+                    className="w-full h-1.5 bg-zinc-900 rounded-lg appearance-none cursor-pointer accent-red-500 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed"
+                  />
+                  <div className="text-[10px] text-zinc-500 leading-normal italic mt-1.5 border-t border-zinc-900/50 pt-1.5">
+                    {language === 'KR' 
+                      ? '* 빗소리와 룸 분위기음(시계 마찰, 물방울, 가스 불꽃 등)을 세밀하게 조정합니다.' 
+                      : language === 'CN' 
+                      ? '* 极佳音色：可精细调节背景雨声与各场景环境专属音效（卧室挂钟、酒窖滴水、厨房沸煮等）。' 
+                      : '* Harmonizes rain and site-specific items (clocks, water hums, fire pops) perfectly.'
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Multi-language local toggle */}
           <div className="flex items-center border border-zinc-800 bg-[#07080b] rounded-lg overflow-hidden text-xs">
@@ -680,12 +1012,8 @@ export default function App() {
                 <h2 className="text-2xl font-serif font-black text-amber-500 uppercase tracking-wider">
                   🎉 {language === 'KR' ? '진정한 숨겨진 진실 폭로' : language === 'CN' ? '终焉真相：百年家族遗产的救赎' : 'Uncovered The Ultimate Lost Truth'}
                 </h2>
-                <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  {language === 'KR'
-                    ? '당신은 마침내 단순 도난극을 넘은 가문 피라미드의 역사적 원한을 폭로했습니다! 소지하고 있던 《야까마귀의 눈》을 통해 주치의 하비 박사가 사실 영주의 서자로 자라나 복수를 도모했음이 밝혀 지며 가문 내부의 가해 관계를 해제하고 완승했습니다.'
-                    : language === 'CN'
-                    ? '您成功锁定了罪犯私人医生哈维！并且凭借搜集到的《夜鸦之眼》物证与对药化学实验室有机溶剂无声消融挂锁的完整推理，哈维见证据确凿瘫坐倒地，供认出了他身为领主私生子为了夺回圣器并洗劫保险箱的惊天家族阴谋！您达成了隐藏完美结局！'
-                    : 'You successfully exposed Doctor Harvey! Armed with both the physical night-raven eye necklace and clinical organic solvent melting formulas, you unraveled he is the long-lost heir of the Raven line plotting legacy recovery. Outstanding detective work! Open Hidden Truth unlocked.'}
+                <p className="text-xs text-zinc-300 leading-relaxed font-sans whitespace-pre-wrap">
+                  {endingTexts.hidden}
                 </p>
               </div>
             ) : endingType === 'perfect' ? (
@@ -693,12 +1021,8 @@ export default function App() {
                 <h2 className="text-xl md:text-2xl font-serif font-black text-emerald-500 uppercase tracking-wider">
                   🏆 {language === 'KR' ? '완벽한 범인 지목 해결엔딩' : language === 'CN' ? '完美破案：捉拿行窃真凶' : 'Perfect Ending: Mastermind Conviction'}
                 </h2>
-                <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  {language === 'KR'
-                    ? '진짜 흉물 훔치기 주범 주치의 하비 박사의 혐의를 입증하고 체포하는 데 승리했습니다! 현장에서 회수한 보물이 영주에게 완벽히 환원되었습니다.'
-                    : language === 'CN'
-                    ? '完美审判！您指控了真正的作案主谋私人医生哈维并追回了《夜鸦之眼》吊坠。虽然哈维背后的世家阴谋和私生关系未被完全剖析，但窃贼已经被绳之以法，古物物归原主。'
-                    : 'A flawless procedural conviction! Dr. Harvey was locked in cuffs and the precious ruby gemstone was successfully secured inside the vault collection.'}
+                <p className="text-xs text-zinc-300 leading-relaxed font-sans whitespace-pre-wrap">
+                  {endingTexts.perfect}
                 </p>
               </div>
             ) : endingType === 'ordinary' ? (
@@ -706,12 +1030,8 @@ export default function App() {
                 <h2 className="text-xl md:text-2xl font-serif font-black text-cyan-500 uppercase tracking-wider">
                   ⚖ {language === 'KR' ? '일반 수사 종료엔딩 (장물 미회수/공범 입건)' : language === 'CN' ? '普通结局：打草惊蛇与残缺的证据' : 'Ordinary Ending: Halfway Resolved'}
                 </h2>
-                <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  {language === 'KR'
-                    ? '당신은 주치의 또는 배후의 집사 공모 관계를 추론해냈지만, 결정적 증물 《야까마귀의 눈》을 찾지 못하여 장물이 다른 바이어에게 은닉 처분되는 반쪽자리 승리를 거두었습니다.'
-                    : language === 'CN'
-                    ? '结案平平。您成功锁定了嫌疑人或协助开门的管家/访客，但由于未能成功在酒窖隐蔽石格搜出挂饰，导致被指控的罪犯百般抵赖，最核心的夜鸦之眼最终神秘失踪。'
-                    : 'Case closed, but incomplete. You linked the accomplices block but failed to secure the primary gemstone itself, leaving the actual jewel long gone.'}
+                <p className="text-xs text-zinc-300 leading-relaxed font-sans whitespace-pre-wrap">
+                  {endingTexts.ordinary}
                 </p>
               </div>
             ) : (
@@ -719,23 +1039,32 @@ export default function App() {
                 <h2 className="text-xl md:text-2xl font-serif font-black text-red-500 uppercase tracking-wider">
                   ❌ {language === 'KR' ? '사상의 억울한 오판 오보엔딩' : language === 'CN' ? '重大冤假错案与真凶匿迹' : 'Misjudgment Ending: Innocents Prosecuted'}
                 </h2>
-                <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  {language === 'KR'
-                    ? '당신은 무고한 고용인 클라라 혹은 억울한 침실 조카 벨라를 잘못 기소하여 대저택 내부에서 역사적 진범 하비 의사가 유유히 자금을 챙겨 잠적하는 비극을 자초했습니다.'
-                    : language === 'CN'
-                    ? '法槌敲错！您错误地控告了无辜的女佣安娜或重度抑郁的侄女，真凶私人医生哈维暗自窃笑，早已携取《夜鸦之眼》潜逃国外。法网疏漏，冤屈难平！'
-                    : 'A tragic misstep! You accused an innocent household member while Dr. Harvey walked free into the rainy night clutching the valuable gemstone.'}
+                <p className="text-xs text-zinc-300 leading-relaxed font-sans whitespace-pre-wrap">
+                  {endingTexts.misjudgment}
                 </p>
               </div>
             )}
 
+            {/* High prominence 2nd-Playthrough Replay button */}
+            <button
+              id="btn-replay-new-round"
+              onClick={handleResetGame}
+              className="mt-6 py-4 bg-gradient-to-r from-red-650 via-amber-600 to-amber-700 hover:from-red-650 hover:to-amber-500 text-white text-xs font-serif font-black tracking-widest uppercase rounded-2xl transition shadow-xl shadow-red-950/40 active:scale-95 flex items-center justify-center gap-2.5 cursor-pointer animate-pulse border border-amber-500/30"
+            >
+              <RefreshCw className="w-4 h-4 animate-spin-slow" />
+              {language === 'KR' 
+                ? '★ 2회차 게임 시작 (새로운 범인 랜덤 배정)' 
+                : language === 'CN' 
+                ? '★ 二刷游戏 (重置并随机生成新凶手)' 
+                : '★ Second Playthrough (Randomize New Suspect)'}
+            </button>
+
             <button
               id="btn-restart-game"
-              onClick={handleResetGame}
-              className="mt-4 py-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-gray-200 text-xs font-mono font-bold tracking-widest uppercase rounded-2xl transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+              onClick={handleResumeInvestigation}
+              className="py-3 bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 text-gray-400 hover:text-white text-[10px] font-mono font-bold tracking-widest uppercase rounded-2xl transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              {t.restartBtn}
+              <span>{t.restartBtn}</span>
             </button>
           </div>
         </main>
@@ -770,7 +1099,7 @@ export default function App() {
               {roomHotspots[playerLocation]?.map(spot => {
                 const isNecklace = spot.clueId === 'necklace_hidden';
                 if (isNecklace && necklaceFound) return null;
-                const isDiscovered = discoveredClues.includes(spot.clueId) || (isNecklace && necklaceFound);
+                const isDiscovered = investigatedHotspots.includes(spot.id) || (isNecklace && necklaceFound);
 
                 return (
                   <button
@@ -1083,6 +1412,51 @@ export default function App() {
         onClose={() => setShowHandbook(false)}
       />
 
+      {/* Beautiful Dynamic Feedback Popups for Whiteboard / NPC Interrogations */}
+      {feedbackPopup && feedbackPopup.isOpen && (
+        <div id="feedback-alert-modal" className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in font-sans">
+          <div className={`w-full max-w-md p-6 rounded-3xl border-2 shadow-2xl text-center flex flex-col items-center ${
+            feedbackPopup.type === 'success' 
+              ? 'bg-[#0b170f] border-emerald-500/85 shadow-[0_0_30px_rgba(16,185,129,0.3)]' 
+              : 'bg-[#1a0c0e] border-red-500/85 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
+          }`}>
+            {/* Visual Icon Badge */}
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 text-3xl font-black ${
+              feedbackPopup.type === 'success' 
+                ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-400' 
+                : 'bg-red-950/80 border border-red-500 text-red-500 animate-pulse'
+            }`}>
+              {feedbackPopup.type === 'success' ? '✓' : '✗'}
+            </div>
+
+            <h3 className={`text-base font-serif font-black tracking-widest uppercase mb-2 ${
+              feedbackPopup.type === 'success' ? 'text-emerald-400' : 'text-red-500'
+            }`}>
+              {feedbackPopup.title[language] || feedbackPopup.title['KR']}
+            </h3>
+
+            <div className="text-xs text-zinc-300 leading-relaxed font-sans max-w-sm px-4 py-3 bg-black/40 rounded-xl border border-zinc-900 mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap">
+              {feedbackPopup.message[language] || feedbackPopup.message['KR']}
+            </div>
+
+            <button
+              id="btn-close-feedback-popup"
+              onClick={() => {
+                gameAudio.playPencilWrite();
+                setFeedbackPopup(null);
+              }}
+              className={`mt-6 px-6 py-2.5 rounded-xl font-extrabold text-[10px] tracking-widest uppercase transition duration-150 active:scale-95 cursor-pointer shadow-md ${
+                feedbackPopup.type === 'success' 
+                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-black' 
+                  : 'bg-gradient-to-r from-red-650 to-red-550 text-white border border-red-400/30'
+              }`}
+            >
+              确定 / {t.closeBtn || 'OK'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Special modal displaying the beautiful ruby necklace when discovered */}
       {necklaceFound && evidenceInventory.some(e => e.id === 'night_raven_eye') && (
         <div id="jewel-discovery-modal" className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1250,7 +1624,7 @@ export default function App() {
       {/* 4. DIALOGUE INTERROGATION POPUP MODAL OVERLAY */}
       {activeDialogueNpcId && Object.values(SUSPECTS_DATA).some(n => n.location === playerLocation && n.id === activeDialogueNpcId) && (
         <div id="dialogue-modal-overlay" className="fixed inset-0 z-40 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in text-left">
-          <div id="dialogue-modal" className="w-full max-w-2xl bg-[#0a0a0d] border border-zinc-805 rounded-3xl overflow-hidden shadow-2xl relative">
+          <div id="dialogue-modal" className="w-full max-w-4xl bg-[#0a0a0d] border border-zinc-805 rounded-3xl overflow-hidden shadow-2xl relative">
             {/* Header with Close */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-900 bg-zinc-950/60">
               <span className="text-red-500 bg-red-955 border border-red-900/40 px-2 py-0.5 text-[9px] font-mono tracking-widest rounded leading-none uppercase font-bold">

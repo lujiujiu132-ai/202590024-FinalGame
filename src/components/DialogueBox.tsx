@@ -97,12 +97,12 @@ export default function DialogueBox({
 
       {/* Suspect avatar display */}
       <div className="w-full md:w-56 flex flex-col items-center shrink-0">
-        <div className="w-36 h-36 md:w-44 md:h-44 bg-[#090b10] border-2 rounded-xl flex items-center justify-center overflow-hidden relative group border-zinc-800">
+        <div className="w-40 h-56 md:w-48 md:h-[300px] bg-[#090b10] border-2 rounded-xl flex items-center justify-center overflow-hidden relative group border-zinc-800">
           <img
             src={npc.isOutburst ? npc.outburstAvatar : npc.avatar}
             alt={npc.name[language]}
             referrerPolicy="no-referrer"
-            className="w-full h-full object-cover transition duration-300 transform group-hover:scale-105"
+            className="w-full h-full object-contain p-2 transition duration-300 transform group-hover:scale-[1.03]"
           />
           {npc.isOutburst && (
             <div className="absolute inset-0 bg-red-950/20 mix-blend-overlay animate-pulse" />
@@ -149,7 +149,7 @@ export default function DialogueBox({
       <div className="flex-1 flex flex-col justify-between overflow-hidden">
         
         {/* Chat History Panel */}
-        <div className="h-44 md:h-52 overflow-y-auto border border-zinc-805 bg-[#090b10] rounded-xl p-3 flex flex-col gap-2.5 scrollbar-thin">
+        <div className="h-56 md:h-[260px] overflow-y-auto border border-zinc-805 bg-[#090b10] rounded-xl p-3 flex flex-col gap-2.5 scrollbar-thin">
           <div className="text-[9px] text-[#fb1380] font-mono tracking-widest uppercase text-left pb-1 border-b border-zinc-900 flex items-center justify-between">
             <span>INTERROGATION CHRONOLOGY</span>
             <span>SECURE ENCRYPTED</span>

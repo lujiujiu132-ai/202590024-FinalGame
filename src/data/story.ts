@@ -230,6 +230,118 @@ export const INITIAL_CLUES: ClueNode[] = [
     },
     isDiscovered: false
   },
+  {
+    id: 'mural_clue',
+    title: {
+      KR: "레이스리 유화 장식 뒤의 잔해",
+      CN: "雷斯利油画框后的残留",
+      EN: "Residue Behind Leslie Mural"
+    },
+    description: {
+      KR: "복도 벽화 장식 뒷면에 남아있는 미세한 도색 긁힘 자국. 최근 누군가가 정교하게 탐침을 이용하여 가문 소장품을 수색한 흔적입니다.",
+      CN: "走廊墙上一侧油画壁挂侧壁发现的新划痕与少许石膏屑，暗示近期有人在过道偷偷摸索或撬动不属于其权限的墙体结构。",
+      EN: "Fresh structural scrapes located directly behind the grand wall painting frame, suggesting unrecorded searching attempts."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'clock_clue',
+    title: {
+      KR: "자명종 구역 주변의 정수 적하",
+      CN: "古典立钟座底下的积水",
+      EN: "Moisture Behind Grandfather Clock"
+    },
+    description: {
+      KR: "고풍스러운 입체 괘종시계 아래에 미세하게 고인 소량의 수분 얼룩. 젖은 신발을 신은 누군가가 신속하게 은둔해 숨어들며 남긴 흔적입니다.",
+      CN: "大自鸣钟底座发现的一小滩无色积水。表明在深夜水龙头被恶意放水、积水溅出的同时，曾有人在立钟暗角驻足藏匿过。",
+      EN: "Slight water condensation spots centered below the clock, suggesting a damp-shoed trespasser stood here waiting."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'kniferack_clue',
+    title: {
+      KR: "주방 전용 칼칼 수납대의 흔적",
+      CN: "剔骨刀架上的油脂微粒",
+      EN: "Traces on Culinary Knife Block"
+    },
+    description: {
+      KR: "칼 거치대에 희미하게 무늬가 묻어 있는 유성 성분. 누군가가 주방에서 장갑을 낀 채 손으로 잡다 흘려낸 기름입니다.",
+      CN: "主厨剔骨刀架底座附着的深色机械润滑油渍。暗示行窃者作案时戴着沾有特殊机油的劳动皮手套，并在后厨驻足过。",
+      EN: "Trace chemical machinery oils left on the knife handler block, proving a glove-wearing trespasser examined kitchen tools."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'dinetable_clue',
+    title: {
+      KR: "식탁 의자 다리 밑의 수분 얼룩",
+      CN: "拼边餐桌一角的积水溅痕",
+      EN: "Spill Marks on Pine Dining Table"
+    },
+    description: {
+      KR: "목재 식탁 가장자리에 남아 있는 이상한 액체 비말. 주수 수돗가에서 뿜어져 나온 차가운 수돗물이 여기까지 유입되었습니다.",
+      CN: "木餐桌边缘残留的自来水溅射粉尘痕迹，侧面证实当时放水的水龙头水流冲力相当巨大，绝非自然偶发滴落。",
+      EN: "Rushing tap water splash sprinkles detected nearby on the dining table, corroborating high-velocity kitchen water movement."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'drawer_clue',
+    title: {
+      KR: "침대 서랍 모서리의 금속 칩",
+      CN: "床头备用抽屉滑槽的金属碎屑",
+      EN: "Metallic Dust in Bedside Drawer"
+    },
+    description: {
+      KR: "서랍 안쪽 정렬 선반에서 채취된 미세한 연성 긁힘. 복사 열쇠를 정렬하여 대저택 내부를 열기 위해 세공 가공을 가한 자국입니다.",
+      CN: "床头备用备件手拉抽屉深处暗格里的黄铜钥匙擦痕。证明确实有人在这里偷走或复制过备用的保险箱万能副钥匙。",
+      EN: "Fine key-filing brass shavings inside the night drawer, proving someone recently cloned a duplicate estate latch key."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'lamp_clue',
+    title: {
+      KR: "구리 스탠드 머리의 유황 오일",
+      CN: "复古铜绿台灯罩下的指腹痕",
+      EN: "Fingerprints on Opal Lamp Cover"
+    },
+    description: {
+      KR: "침대 주변을 은은하게 비추는 장식 램프 덮개 아래의 지문 패턴. 조사 결과, 조카 벨라의 무늬가 검출되어 밤사이 활동이 입증됩니다.",
+      CN: "复古台灯转轴背后发现的一枚带灰滑润指纹，匹配显示其为大小姐塞西莉亚，证实她当晚绝非乖乖躺着入睡休整。",
+      EN: "Slight smudge indices on the lamp turn key, directly tracing to Bella and exposing her active presence late into the midnight hour."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'winerack_clue',
+    title: {
+      KR: "와인 보관소 선반의 자외선 반응",
+      CN: "陈年白兰地酒架上的特殊刮白",
+      EN: "Abrasions on Mahogany Wine Rack"
+    },
+    description: {
+      KR: "와인 코너 중앙에서 포착된 하얀 침전 긁힘. 병 보관에 필요한 장치가 아니라 소금 화학 약품 병을 흔들며 남겨진 도포 흔적입니다.",
+      CN: "陈旧酒架暗角残留的高温白浊化学锈化，极似在熔毁展示柜时所伴随产生的极性化合物粉末，证明熔锁工具此前曾存放于酒窖。",
+      EN: "Traces of white chemical efflorescence typical of active organic solvents. Indicates the lock melting tool was once placed inside the cellar selection."
+    },
+    isDiscovered: false
+  },
+  {
+    id: 'groundgrate_clue',
+    title: {
+      KR: "지하 지하 비밀 통로의 긁힘",
+      CN: "地下冷库铁格栅新裂痕",
+      EN: "Scrapes on Rust Iron Sub-floor Grate"
+    },
+    description: {
+      KR: "지하 냉동고 격자창 주변에 박혀 있던 가벼운 철망 부스러기. 무거운 상자가 통과하며 금속이 휘고 긁혀나간 마찰입니다.",
+      CN: "地下通气隔油池底格栅上发现的铁斑磨损。证明曾有一个包含重金属质地的储物柜被强行在此处抽拉摩擦过。",
+      EN: "Deep metal scoring left across the dark basement floor, suggesting heavy vault box relocation maneuvers occurred here."
+    },
+    isDiscovered: false
+  },
 
   // 1-3 Deep Logical Clues Unlocked via combining:
   {

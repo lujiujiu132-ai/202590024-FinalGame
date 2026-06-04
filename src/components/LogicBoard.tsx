@@ -52,22 +52,19 @@ export default function LogicBoard({
     const originalClues = discoveredClues.filter(c => !isDeductionClue(c.id));
     const deductionClues = discoveredClues.filter(c => isDeductionClue(c.id));
 
-    // Place original clues on left columns (2 rows to prevent overlapping)
+    // Place original clues horizontally on Row 1 (y: 40)
     originalClues.forEach((clue, idx) => {
-      const col = idx % 2;
-      const row = Math.floor(idx / 2);
       snap[clue.id] = {
-        x: 35 + col * 235,
-        y: 25 + row * 115
+        x: 35 + idx * 245,
+        y: 40
       };
     });
 
-    // Place deduction results neatly in column 3 (on the absolute right side)
-    // Connecting links between columns on the left won't cross or cover these cards!
+    // Place deduction results horizontally on Row 2 (y: 220)
     deductionClues.forEach((clue, idx) => {
       snap[clue.id] = {
-        x: 525,
-        y: 25 + idx * 115
+        x: 35 + idx * 245,
+        y: 220
       };
     });
 
@@ -84,11 +81,9 @@ export default function LogicBoard({
 
     originalClues.forEach((clue, idx) => {
       if (!newPositions[clue.id]) {
-        const col = idx % 2;
-        const row = Math.floor(idx / 2);
         newPositions[clue.id] = {
-          x: 35 + col * 235,
-          y: 25 + row * 115
+          x: 35 + idx * 245,
+          y: 40
         };
         changed = true;
       }
@@ -97,8 +92,8 @@ export default function LogicBoard({
     deductionClues.forEach((clue, idx) => {
       if (!newPositions[clue.id]) {
         newPositions[clue.id] = {
-          x: 525,
-          y: 25 + idx * 115
+          x: 35 + idx * 245,
+          y: 220
         };
         changed = true;
       }
@@ -155,7 +150,6 @@ export default function LogicBoard({
   // Execute logic deduction combination
   const handleDeduct = () => {
     if (selectedNodeIds.length !== 2) return;
-    onAddConnection(selectedNodeIds[0], selectedNodeIds[1]);
     onRunDeduction(selectedNodeIds);
     setSelectedNodeIds([]);
   };
@@ -299,13 +293,22 @@ export default function LogicBoard({
       )}
 
       {/* Main interactive draggable card canvas area */}
-      <div
-        ref={containerRef}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        className="w-full h-[410px] bg-[#050608] border border-zinc-900 rounded-2xl relative overflow-hidden select-none cursor-crosshair shadow-inner"
-      >
+      <div className="w-full overflow-x-auto overflow-y-hidden border border-zinc-900 rounded-2xl bg-[#050608] shadow-inner pb-1 custom-scrollbar">
+        <div
+          ref={containerRef}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          style={{
+            width: discoveredClues.length === 0
+              ? '100%'
+              : `${Math.max(1050, Math.max(
+                  discoveredClues.filter(c => !isDeductionClue(c.id)).length,
+                  discoveredClues.filter(c => isDeductionClue(c.id)).length
+                ) * 250 + 80)}px`
+          }}
+          className="h-[410px] relative select-none cursor-crosshair"
+        >
         {/* Dynamic linking strings render overlay */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
           {renderLines()}
@@ -428,6 +431,7 @@ export default function LogicBoard({
             </div>
           );
         })}
+        </div>
       </div>
 
       <div className="p-2.5 mt-3 rounded-xl bg-zinc-950/70 border border-zinc-900 border-dashed text-left text-[10px] text-zinc-400 leading-relaxed font-sans z-10 flex items-start gap-2">
