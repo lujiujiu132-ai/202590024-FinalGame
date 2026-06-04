@@ -130,11 +130,18 @@ export default function App() {
     async function loadSheets() {
       try {
         const res = await fetch('/api/sheet-data');
+        if (!res.ok) {
+          throw new Error(`HTTP status ${res.status}`);
+        }
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Response is not JSON');
+        }
         const json = await res.json();
         if (json.success && json.data) {
           setSheetData(json.data);
         } else {
-          throw new Error('Fallback triggered');
+          throw new Error('Response success flag is false');
         }
       } catch (err) {
         console.warn('Live Google Sheets offline, falling back directly to local static JSONs...', err);
@@ -1354,7 +1361,7 @@ export default function App() {
                 {evidenceInventory.map(item => (
                   <div key={item.id} className="flex gap-2.5 p-2 bg-zinc-950/60 border border-zinc-900 rounded-xl transition-all hover:border-amber-600/30">
                     <div className="w-10 h-10 bg-zinc-900 border border-zinc-850 rounded-lg shrink-0 overflow-hidden">
-                      <img src={item.image} alt="Evidence item" className="w-full h-full object-cover" />
+                      <img src={item.image} alt="Evidence item" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-[10px] font-bold text-amber-500 truncate">{item.name[language]}</h4>
