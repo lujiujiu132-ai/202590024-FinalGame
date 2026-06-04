@@ -1089,7 +1089,7 @@ export default function App() {
         </main>
       ) : (
         // Central Investigation Dashboard
-        <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <main className="flex-1 max-w-[1550px] w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* Main Visual Novel Presentation Frame */}
           <section className="lg:col-span-8 space-y-6">
@@ -1098,7 +1098,7 @@ export default function App() {
             <div
               id="scene-visual-novel"
               style={{ backgroundImage: `url('${getActiveBackground()}')` }}
-              className="w-full h-80 md:h-[420px] rounded-2xl bg-cover bg-center border border-zinc-805 shadow-2xl relative overflow-hidden flex items-end justify-between p-4 bg-[#0a0a0d]"
+              className="w-full h-96 md:h-[500px] lg:h-[580px] xl:h-[640px] rounded-2xl bg-cover bg-center border border-zinc-805 shadow-2xl relative overflow-hidden flex items-end justify-between p-4 bg-[#0a0a0d]"
             >
               {/* Cinematic vignetting shadow mask */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/35 pointer-events-none z-0" />
@@ -1159,7 +1159,7 @@ export default function App() {
                   className="absolute bottom-0 select-none flex flex-col items-center pb-2 pointer-events-auto"
                   style={{ left: '16%', transform: 'translateX(-50%)' }}
                 >
-                  <div className="w-24 h-40 md:w-30 md:h-[260px] overflow-hidden relative">
+                  <div className="w-28 h-48 md:w-36 md:h-[320px] lg:w-44 lg:h-[400px] xl:w-52 xl:h-[460px] overflow-hidden relative">
                     <img
                       src={getPlayerAvatarUrl()}
                       alt="Detective Investigator"
@@ -1167,7 +1167,7 @@ export default function App() {
                       className="w-full h-full object-contain filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.85)] brightness-95"
                     />
                   </div>
-                  <span className="mt-1 bg-black/85 border border-zinc-800 text-[8px] tracking-widest font-mono text-zinc-400 px-2 py-0.5 rounded uppercase leading-none">
+                  <span className="mt-1.5 bg-black/85 border border-zinc-800 text-[9px] md:text-[10px] tracking-widest font-mono text-zinc-400 px-2.5 py-1 rounded uppercase leading-none">
                     {necklaceFound ? 'CONFIDENT DETECTIVE' : 'INSPECTING'}
                   </span>
                 </div>
@@ -1196,7 +1196,7 @@ export default function App() {
                       >
                         {/* Active Interrogation Floating Marker Arrow */}
                         {isSelected && (
-                          <div className="absolute -top-6 flex flex-col items-center animate-bounce">
+                          <div className="absolute -top-8 flex flex-col items-center animate-bounce">
                             <span className="bg-red-650 text-white text-[8px] font-mono font-bold tracking-wider px-1.5 py-0.5 rounded uppercase leading-none shadow-lg">
                               INTERROGATING
                             </span>
@@ -1204,7 +1204,7 @@ export default function App() {
                           </div>
                         )}
 
-                        <div className="w-24 h-40 md:w-30 md:h-[260px] overflow-hidden relative">
+                        <div className="w-28 h-48 md:w-36 md:h-[320px] lg:w-44 lg:h-[400px] xl:w-52 xl:h-[460px] overflow-hidden relative">
                           <img
                             src={npc.isOutburst ? npc.outburstAvatar : npc.avatar}
                             alt={npc.name[language]}
@@ -1218,7 +1218,7 @@ export default function App() {
                           />
                         </div>
 
-                        <span className={`mt-1 border text-[8px] tracking-widest font-mono px-2 py-0.5 rounded uppercase leading-none transition-all ${
+                        <span className={`mt-1.5 border text-[9px] md:text-[10px] tracking-widest font-mono px-2.5 py-1 rounded uppercase leading-none transition-all ${
                           isSelected
                             ? 'border-red-600 bg-red-950 text-red-400 font-extrabold animate-pulse'
                             : npc.isOutburst
@@ -1643,7 +1643,7 @@ export default function App() {
       {/* 4. DIALOGUE INTERROGATION POPUP MODAL OVERLAY */}
       {activeDialogueNpcId && Object.values(SUSPECTS_DATA).some(n => n.location === playerLocation && n.id === activeDialogueNpcId) && (
         <div id="dialogue-modal-overlay" className="fixed inset-0 z-40 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in text-left">
-          <div id="dialogue-modal" className="w-full max-w-4xl bg-[#0a0a0d] border border-zinc-805 rounded-3xl overflow-hidden shadow-2xl relative">
+          <div id="dialogue-modal" className="w-full max-w-5xl bg-[#0a0a0d] border border-zinc-805 rounded-3xl overflow-hidden shadow-2xl relative">
             {/* Header with Close */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-900 bg-zinc-950/60">
               <span className="text-red-500 bg-red-955 border border-red-900/40 px-2 py-0.5 text-[9px] font-mono tracking-widest rounded leading-none uppercase font-bold">
